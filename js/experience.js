@@ -13,7 +13,7 @@
   // ── Tunables (easy to dial in) ───────────────────────
   const STORAGE_KEY = 'shop-moment-data';
   const SPOTLIGHT_START = 6.0;   // seconds — sequence kicks off (veil first, then pills/caption/buy)
-  const SPOTLIGHT_END = 15.4;    // seconds — moment ends right as the countdown bar drains
+  const SPOTLIGHT_END = 13.4;    // seconds — moment ends right as the countdown bar drains (4s hold)
   const DIM_ALPHA = 0.6;         // max darkness of the veil (~scene at 40%)
   const GROW = 4.5;              // how far the veil spreads outward × Doué's box half-width
   const MIN_R_VH = 0.28;         // floor on veil radius as a fraction of the smaller screen side
@@ -23,6 +23,7 @@
 
   let video, stage, dim, pillsWrap, caption, buy, cart, cartCount, drawer, drawerItems;
   let pdpCard, pdpImg, pdpName, pdpPriceWas, pdpPriceNow, pdpStage;
+  let canvasNormal, canvasXray, ctxNormal, ctxXray, drawRafId;
   let doue = null;
   let lastBox = null;
   let revealed = false;
@@ -49,15 +50,49 @@
     doue = looks.find(l => l.id === 'p-doue') || looks[0] || null;
   }
 
-  // ── Video rect (object-fit: contain) ─────────────────
+  // ── Video rect (contained 16:9 area inside the stage) ─
+  // The <video> source is doubled-width (32:9), but each canvas renders one
+  // 16:9 HALF, so videoRect always uses 16:9 aspect regardless of the source.
   function videoRect() {
     const r = stage.getBoundingClientRect();
-    const va = (video.videoWidth / video.videoHeight) || (16 / 9);
+    const va = 16 / 9;
     const ca = r.width / r.height;
     let w, h, x, y;
     if (ca > va) { h = r.height; w = h * va; x = (r.width - w) / 2; y = 0; }
     else { w = r.width; h = w / va; x = 0; y = (r.height - h) / 2; }
     return { x, y, width: w, height: h };
+  }
+
+  // ── Double-video canvas pipeline (Week 3 pattern) ────
+  // Two canvases draw left + right halves of the source video each frame.
+  // The xray (right) canvas fades in via CSS opacity to create the highlight.
+  function startDrawLoop() {
+    if (!canvasNormal || !canvasXray || !ctxNormal || !ctxXray) return;
+    function draw() {
+      if (video.readyState >= 2 && video.videoWidth) {
+        const halfW = video.videoWidth / 2;
+        const h = video.videoHeight;
+        // Set internal canvas dims once (idempotent — only resizes on first run)
+        if (canvasNormal.width !== halfW) { canvasNormal.width = halfW; canvasNormal.height = h; }
+        if (canvasXray.width   !== halfW) { canvasXray.width   = halfW; canvasXray.height   = h; }
+        ctxNormal.drawImage(video, 0,     0, halfW, h, 0, 0, halfW, h);
+        ctxXray.drawImage(  video, halfW, 0, halfW, h, 0, 0, halfW, h);
+      }
+      drawRafId = requestAnimationFrame(draw);
+    }
+    cancelAnimationFrame(drawRafId);
+    drawRafId = requestAnimationFrame(draw);
+  }
+
+  function layoutCanvases() {
+    if (!canvasNormal || !canvasXray) return;
+    const v = videoRect();
+    for (const c of [canvasNormal, canvasXray]) {
+      c.style.left = v.x + 'px';
+      c.style.top  = v.y + 'px';
+      c.style.width  = v.width + 'px';
+      c.style.height = v.height + 'px';
+    }
   }
 
   // ── Pills + caption ──────────────────────────────────
@@ -128,12 +163,16 @@
     clearRevealTimers();
     const pillEls = pillsWrap.querySelectorAll('.pill');
     const schedule = (delayMs, fn) => revealTimers.push(setTimeout(fn, delayMs));
+    // Xray (dimmed-around-Doué) fades in first, briefly before the popups,
+    // so the moment "lights up" before any UI shows up.
+    schedule(300,  () => canvasXray && canvasXray.classList.add('is-on'));
     schedule(1700, () => pillEls[0] && pillEls[0].classList.add('is-in')); // top pill
     schedule(1850, () => pillEls[1] && pillEls[1].classList.add('is-in')); // middle
     schedule(2000, () => pillEls[2] && pillEls[2].classList.add('is-in')); // bottom
     schedule(2450, () => caption && caption.classList.add('is-in'));
-    schedule(2500, () => cart && cart.classList.add('is-in'));
     schedule(2850, () => buy && buy.classList.add('is-in'));              // internal stagger handled by .buy CSS
+    // Cart icon is NOT scheduled here — it only appears after the user adds
+    // an item via ATC (handled in closePdp when cartItems is non-empty).
   }
   function clearRevealTimers() {
     revealTimers.forEach(t => clearTimeout(t));
@@ -168,6 +207,12 @@
     pillsWrap.querySelectorAll('.pill').forEach(p => p.classList.remove('is-selected'));
     if (caption) caption.classList.remove('is-hidden');
     if (buy) buy.classList.remove('is-paused');
+    // Cart slides in (from the right) AFTER the PDP starts sliding out,
+    // but only if the user actually added something. Stays for subsequent
+    // shopping until SPOTLIGHT_END / replay.
+    if (cart && cartItems.length > 0 && !cart.classList.contains('is-in')) {
+      setTimeout(() => cart.classList.add('is-in'), 250);
+    }
     if (pauseStart !== null) {
       totalPaused += Math.max(0, video.currentTime - pauseStart);
       pauseStart = null;
@@ -282,6 +327,7 @@
   // Pin the pill stack + caption to the video's left edge and scale them
   // to the contained video, matching the Figma frame's ratios.
   function layoutPills() {
+    layoutCanvases();
     const v = videoRect();
     const ph = v.height * 0.1937;   // 72.875 / 376.25
     const pw = v.height * 0.1808;   // 68.017 / 376.25
@@ -317,39 +363,36 @@
       buy.style.height = (v.height * 0.10631) + 'px';      // 40 / 376.25
       buy.style.fontSize = (v.height * 0.03987) + 'px';    // 15 / 376.25
     }
-    // Expanded-PDP target size — same ratio as a mini thumb,
-    // height = full 3-pill column. Font size scales the card's interior.
-    const columnH = v.height * 0.597;                        // 3 pills + 2 gaps (Figma)
-    const pdpH    = columnH;
-    const pdpW    = pdpH * 0.93;                             // pill aspect 68/73
+    // PDP card geometry — matches Figma frame 48 (1:1 ratio).
+    // Card is tall (78% of video height, top at 15.6%), product image overflows
+    // the card horizontally by ~16% per side (image 132% × card width).
+    const pdpH = v.height * 0.782;                           // Figma 943 / 1206
+    const pdpW = v.width  * 0.305;                           // Figma 653 / 2144
     pillsWrap.style.setProperty('--pdp-w', pdpW + 'px');
     pillsWrap.style.setProperty('--pdp-h', pdpH + 'px');
-    // Cap the rotating image so the expanded card has room for content below.
-    // (Mini pill: 77% of 73 ≈ 56px, never hits cap. Expanded: caps at ~50% of card.)
+    // Caps are still useful for the mini-thumb image inside the pill (capped at
+    // ~50% of the card-equiv area). For the PDP card image, CSS uses explicit
+    // 132% / 58% values that scale beyond the card.
     pillsWrap.style.setProperty('--img-max-h', (pdpH * 0.5) + 'px');
     pillsWrap.style.setProperty('--img-max-w', (pdpW * 0.85) + 'px');
     // 1em inside the card ≈ 12px on phone (scales w/ video height) — drives all PDP text
     pillsWrap.style.setProperty('font-size', (v.height * 0.031) + 'px');
-    // Cart icon: bottom-right, BOTTOM EDGE aligned with the BUY-NOW pill's
-    // bottom (= container_top + container_h × 0.517, where the pill sits at
-    // top:-20.8% / height:72.5% of the container).
+    // Cart icon: right-aligned, just above the PDP top edge (which sits at 0.156 of videoH).
+    // Bumped a bit lower (cart bottom at 0.18 of videoH).
     if (cart) {
-      const cs = v.height * 0.085;                           // smaller than before
-      const buyPillBottomY = v.y + v.height * 0.94;          // 0.885 + 0.10631×0.517
+      const cs = v.height * 0.085;
       cart.style.setProperty('--cart-size', cs + 'px');
       cart.style.left = (v.x + v.width - cs - v.width * 0.0239) + 'px';
-      cart.style.top  = (buyPillBottomY - cs) + 'px';
-      cart.style.fontSize = (v.height * 0.05) + 'px';        // drives count/icon size scaling
+      cart.style.top  = (v.y + v.height * 0.23 - cs) + 'px';
+      cart.style.fontSize = (v.height * 0.05) + 'px';
     }
-    // PDP card: mirrors the pill column on the right side of the video
+    // PDP card: tall, hugs the right edge — Figma frame 48 positions (1:1).
     if (pdpCard) {
       pdpCard.style.width  = pdpW + 'px';
       pdpCard.style.height = pdpH + 'px';
-      pdpCard.style.top    = (v.y + v.height * 0.202) + 'px';
-      pdpCard.style.left   = (v.x + v.width - pdpW - v.width * 0.0344) + 'px';
+      pdpCard.style.top    = (v.y + v.height * 0.156) + 'px';   // Figma 188 / 1206
+      pdpCard.style.left   = (v.x + v.width - pdpW - v.width * 0.035) + 'px';
       pdpCard.style.fontSize = (v.height * 0.031) + 'px';
-      pdpCard.style.setProperty('--img-max-h', (pdpH * 0.5) + 'px');
-      pdpCard.style.setProperty('--img-max-w', (pdpW * 0.85) + 'px');
     }
   }
 
@@ -425,6 +468,7 @@
       if (pdpOpen) closePdp();                                         // slide PDP out with the moment
       if (buy) buy.classList.remove('is-in');                          // buy wipes back right→left
       if (cart) cart.classList.remove('is-in');                        // cart slides back down
+      if (canvasXray) canvasXray.classList.remove('is-on');            // xray fades back to normal
       setTimeout(() => {
         if (caption) caption.classList.remove('is-in');                // caption fades w/ first pill
         const pillEls = pillsWrap.querySelectorAll('.pill');
@@ -456,6 +500,13 @@
     pdpPriceWas = document.getElementById('pdp-price-was');
     pdpPriceNow = document.getElementById('pdp-price-now');
     pdpStage = document.getElementById('pdp-stage');
+    canvasNormal = document.getElementById('canvas-normal');
+    canvasXray   = document.getElementById('canvas-xray');
+    if (canvasNormal) ctxNormal = canvasNormal.getContext('2d');
+    if (canvasXray)   ctxXray   = canvasXray.getContext('2d');
+    layoutCanvases();
+    if (video.readyState >= 1) startDrawLoop();
+    else video.addEventListener('loadedmetadata', startDrawLoop, { once: true });
     // Stop card-internal taps from bubbling to the stage (which would close it)
     if (pdpCard) pdpCard.addEventListener('click', (e) => e.stopPropagation());
 
@@ -526,6 +577,7 @@
       cartItems.length = 0; renderCart();                              // empty cart for a fresh take
       if (cart) cart.classList.remove('has-items', 'is-in');
       if (pdpCard) pdpCard.classList.remove('is-open', 'is-swapping');
+      if (canvasXray) canvasXray.classList.remove('is-on');
       pillsWrap.classList.remove('is-shopping');
       pillsWrap.querySelectorAll('.pill').forEach(p => { p.classList.remove('is-in'); p.classList.remove('is-selected'); });
       if (caption) { caption.classList.remove('is-in'); caption.classList.remove('is-hidden'); }

@@ -16,10 +16,14 @@
   <body>
 
     <div class="stage" id="stage">
-      <!-- starts muted so iOS allows autoplay, JS unmutes on first user gesture -->
+      <!-- Source video is doubled-width: left half = normal, right half = dimmed-around-Doué.
+           The <video> element is hidden; two canvases draw from it (Week 3 pattern).
+           Starts muted so iOS allows autoplay, JS unmutes on first user gesture. -->
       <video id="match-video" class="stage-video"
-             src="assets/video/psg_goal.mp4"
+             src="assets/video/psg_goal_double.mp4"
              preload="auto" autoplay muted playsinline></video>
+      <canvas id="canvas-normal" class="stage-canvas"></canvas>
+      <canvas id="canvas-xray"   class="stage-canvas stage-xray"></canvas>
       <div class="dim" id="dim"></div>
     </div>
 

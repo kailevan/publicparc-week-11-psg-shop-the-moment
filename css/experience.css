@@ -27,14 +27,27 @@ html, body {
 
 /* ── Stage ─────────────────────────────────────────────── */
 .stage { position: fixed; inset: 0; background: #000; }
+/* Hidden video element: source of playback only — canvases draw from it */
 .stage-video {
   position: absolute;
   inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  display: block;
+  width: 1px; height: 1px;
+  opacity: 0;
+  pointer-events: none;
 }
+/* Canvases: position/size set inline by JS to match videoRect (contained 16:9). */
+.stage-canvas {
+  position: absolute;
+  display: block;
+  pointer-events: none;
+}
+/* X-ray canvas (right half of double video — dimmed-except-Doué) sits over
+   normal canvas. Fades in just before popups; fades out as the moment ends. */
+.stage-xray {
+  opacity: 0;
+  transition: opacity 1.4s ease;
+}
+.stage-xray.is-on { opacity: 1; }
 
 /* ── Spotlight dim layer ───────────────────────────────── */
 /* The dark radial is painted into background via JS each frame so the
@@ -205,11 +218,11 @@ html, body {
      drains, so removing .is-in on exit doesn't snap it back to full. */
   transform: scaleX(0);
 }
-/* countdown timer: drains left→right over 6s once the button has fully landed
+/* countdown timer: drains left→right over 4s once the button has fully landed
    (wipe finishes 0.55s after .is-in). `both` keeps the full bar during the
    pre-delay AND the empty state after, so exits don't snap back to full. */
 .buy.is-in .buy-underline {
-  animation: buyTimer 6s linear 0.55s both;
+  animation: buyTimer 4s linear 0.55s both;
 }
 @keyframes buyTimer {
   from { transform: scaleX(1); }
@@ -281,12 +294,14 @@ html, body {
   position: fixed;
   z-index: 5;
   box-sizing: border-box;
-  /* width / height / top / left set inline by JS */
-  padding: 12.3em 0.7em 0.7em;
+  /* width / height / top / left set inline by JS.
+     Padding-top accommodates the large product image that overflows the card. */
+  padding: 19.3em 0.7em 0.7em;
   display: flex;
   flex-direction: column;
   background: rgba(2, 8, 80, 0.85);
   border-radius: 0.7em;
+  overflow: visible;     /* let the PDP image bleed past card edges */
   font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
   color: rgba(255, 255, 255, 0.94);
   /* Off-screen right by default */
@@ -307,24 +322,24 @@ html, body {
   opacity: 0;
   transition: opacity 0.15s ease;
 }
-/* Image inside the PDP card — same top-anchored pattern as the pill thumb. */
+/* Image inside the PDP card — bigger than the card, extends beyond it.
+   Width 132% / height 58% of card, top-anchored. Matches Figma frame 48. */
 .pdp-img {
   position: absolute;
-  top: 11%;
+  top: 8.4%;             /* Figma 79 / 943 */
   left: 50%;
   transform: translateX(-50%);
-  width: 67.1%;
-  height: 77.25%;
-  max-width: var(--img-max-w, 100%);
-  max-height: var(--img-max-h, 100%);
+  width: 132%;           /* Figma 864 / 653 — overflows card on both sides */
+  height: 58%;           /* Figma 547 / 943 */
   object-fit: contain;
   display: block;
   transition: opacity 0.15s ease;
 }
 .pdp-card.is-swapping .pdp-img { opacity: 0; }
 /* Per-product image position inside the PDP card */
-.pdp-card[data-product-id="shirt"]  .pdp-img { top: 7%; }   /* lift shirt a bit higher */
-.pdp-card[data-product-id="shorts"] .pdp-img { top: 9%; }   /* push shorts a bit lower */
+.pdp-card[data-product-id="shirt"]  .pdp-img { top: 8.4%; }
+.pdp-card[data-product-id="shorts"] .pdp-img { top: 10%;  }
+.pdp-card[data-product-id="boots"]  .pdp-img { top: 7%;   }
 
 .pdp-name {
   font-size: 0.88em;
@@ -341,7 +356,7 @@ html, body {
 .pdp-price {
   display: flex;
   align-items: baseline;
-  justify-content: center;     /* center horizontally in the card */
+  /* left-aligned, flush with the name (matches Figma) */
   gap: 0.45em;
   margin-bottom: 0.55em;
 }
@@ -368,15 +383,15 @@ html, body {
   flex-direction: row;
   flex-wrap: nowrap;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;   /* left-align chips with the product title */
   min-height: 0;
 }
 
 .size-chip {
   flex: 0 0 auto;
-  /* Sized so 6 apparel chips + 5 margins fill the card's content width
-     (= contentW 16.5em). 6 × 2.48em + 5 × 0.32em ≈ 16.48em. */
-  min-width: 2.48em;
+  /* Compact left-aligned row that matches Figma: chips don't fill the row,
+     they hug the title's left edge with a small gap between chips. */
+  min-width: 2.19em;
   height: 1.95em;
   padding: 0 0.3em;
   margin-right: 0.32em;
@@ -410,12 +425,12 @@ html, body {
   color: #fff;
 }
 
-/* Boots get 8 chips — sized so 8 × 1.87em + 7 × 0.22em ≈ 16.5em (contentW) */
+/* Boots get 8 chips — narrower + smaller gap so all 8 fit on one row.
+   Font-size stays at 0.85em (no override) so chip HEIGHT matches apparel chips. */
 .pdp-card[data-product-id="boots"] .size-chip {
-  min-width: 1.87em;
+  min-width: 1.65em;
   padding: 0 0.22em;
   margin-right: 0.22em;
-  font-size: 0.78em;
 }
 
 /* Step 2: collapse non-selected chips entirely */
@@ -475,7 +490,9 @@ html, body {
 .pills.is-shopping .pill { opacity: 0.4; transition: opacity 0.15s ease; }
 .pills.is-shopping .pill.is-selected { opacity: 1; }
 
-/* ── Cart icon (bottom-right) ───────────────────────────── */
+/* ── Cart icon (right side, just above where the PDP card was) ──
+   Hidden by default. Only slides in (from the right) after the user
+   adds an item and the PDP card closes. Hides again when the moment ends. */
 .cart {
   position: fixed;
   z-index: 5;
@@ -490,8 +507,8 @@ html, body {
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   opacity: 0;
-  transform: translateY(40%);
-  transition: opacity 0.5s var(--ease), transform 0.6s var(--ease);
+  transform: translateX(40%);
+  transition: opacity 0.4s var(--ease), transform 0.5s var(--ease);
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
 }
 .cart.is-in { opacity: 1; transform: translateY(0); } /* entry scheduled by JS */
