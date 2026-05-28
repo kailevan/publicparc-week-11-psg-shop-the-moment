@@ -12,8 +12,8 @@
 
   // ── Tunables (easy to dial in) ───────────────────────
   const STORAGE_KEY = 'shop-moment-data';
-  const SPOTLIGHT_START = 6.0;   // seconds — sequence kicks off (veil first, then pills/caption/buy)
-  const SPOTLIGHT_END = 13.4;    // seconds — moment ends right as the countdown bar drains (4s hold)
+  const SPOTLIGHT_START = 4.25;  // seconds — sequence kicks off (veil first, then pills/caption/buy)
+  const SPOTLIGHT_END = 11.65;   // seconds — moment ends right as the countdown bar drains (4s hold)
   const DIM_ALPHA = 0.6;         // max darkness of the veil (~scene at 40%)
   const GROW = 4.5;              // how far the veil spreads outward × Doué's box half-width
   const MIN_R_VH = 0.28;         // floor on veil radius as a fraction of the smaller screen side
