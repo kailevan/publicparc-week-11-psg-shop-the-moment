@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>Shop the Moment — PSG</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=Saira:wght@400;500;600&family=Saira+Condensed:wght@600;700;800&display=swap" />
+    <link rel="stylesheet" href="css/reset.css" />
+    <link rel="stylesheet" href="css/experience.css" />
+  </head>
+  <body>
+
+    <div class="stage" id="stage">
+      <video id="match-video" class="stage-video"
+             src="assets/video/psg_goal.mp4"
+             preload="auto" autoplay muted playsinline></video>
+      <div class="dim" id="dim"></div>
+    </div>
+
+    <div class="pills" id="pills"></div>
+    <div class="moment-caption" id="caption"></div>
+
+    <!-- Buy button (Figma 7209:1463) — gradient pill + PSG crest -->
+    <div class="buy" id="buy">
+      <div class="buy-pill">
+        <span class="buy-label">BUY NOW AND SAVE 10%</span>
+        <span class="buy-underline"></span>
+      </div>
+      <img class="buy-logo" src="assets/ui/psg-logo.png" alt="Paris Saint-Germain" />
+    </div>
+
+    <button class="ctl-btn" id="fs-btn" title="Fullscreen" aria-label="Fullscreen"></button>
+    <button class="ctl-btn" id="sound-btn" title="Sound">🔇</button>
+
+    <!-- order matters: utils → data → products → experience -->
+    <script src="js/utils.js"></script>
+    <script src="js/data.js"></script>
+    <script src="js/products.js"></script>
+    <script src="js/experience.js"></script>
+  </body>
+</html>

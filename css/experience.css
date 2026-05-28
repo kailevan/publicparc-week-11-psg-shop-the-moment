@@ -1,0 +1,237 @@
+/* ────────────────────────────────────────────────────────────
+   Shop the Moment — experience
+   At ~10s a feathered veil locks onto Doué, the rest of the frame
+   dims to ~40%, and three product pills slide in as a left-edge stack
+   with a broadcast caption (Figma 7209-1450).
+   Built for a phone held landscape (standalone web app).
+   ──────────────────────────────────────────────────────────── */
+
+:root {
+  --ink: #f6f6f7;
+  --hair: rgba(255, 255, 255, 0.14);
+  --ease: cubic-bezier(0.19, 1, 0.22, 1);
+  --psg: #e30613;
+  --display: "Saira Condensed", "Helvetica Neue", sans-serif;
+  --text: "Saira", "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+html, body {
+  height: 100%;
+  margin: 0;
+  background: #000;
+  font-family: var(--text);
+  color: var(--ink);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Stage ─────────────────────────────────────────────── */
+.stage { position: fixed; inset: 0; background: #000; }
+.stage-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+/* ── Spotlight dim layer ───────────────────────────────── */
+/* The dark radial is painted into background via JS each frame so the
+   clear centre follows Doué. We just animate its opacity in. */
+.dim {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  opacity: 0;
+  /* longer + softer ease-in-out so the veil clearly breathes in first */
+  transition: opacity 2.2s cubic-bezier(0.4, 0, 0.6, 1);
+}
+.dim.is-on { opacity: 1; }
+
+/* ── Product pills (left vertical stack — Figma 7209-1450) ─ */
+/* left/top + size vars are set by JS so the stack hugs the
+   video's left edge and scales with the contained video. */
+.pills {
+  position: fixed;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pill-gap, 3px);
+  pointer-events: none; /* children re-enable */
+}
+.pill {
+  position: relative;
+  width: var(--pill-w, 68px);
+  height: var(--pill-h, 73px);
+  border-radius: var(--pill-rad, 6px);
+  background: rgba(2, 8, 80, 0.85); /* PSG deep navy */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  pointer-events: auto;
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.6);
+  transition: transform 0.42s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.28s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.pill img,
+.pill video {
+  width: 67.1%;   /* 45.652 / 68.017 */
+  height: 77.25%; /* 56.289 / 72.875 */
+  object-fit: contain;
+  /* real product cutouts read cleanest shown normally; screen-blend
+     (Figma's white-render trick) ghosts the navy kit items out */
+  display: block;
+}
+.pill:active { transform: scale(0.95); }
+
+/* per-pill .is-in so we can stagger entry AND exit independently
+   (parent class made parent-driven exits unstaggerable) */
+.pill.is-in { opacity: 1; transform: scale(1); }
+.pill:nth-child(1).is-in { transition-delay: 1.70s; } /* entry: top → middle → bottom */
+.pill:nth-child(2).is-in { transition-delay: 1.85s; }
+.pill:nth-child(3).is-in { transition-delay: 2.00s; }
+
+/* per-product visual sizing inside the pill — shorts a touch smaller,
+   shirt a touch bigger; boots use the default */
+.pill[data-product-id="shorts"] img,
+.pill[data-product-id="shorts"] video { width: 60%; height: 70%; }
+.pill[data-product-id="shirt"]  img,
+.pill[data-product-id="shirt"]  video { width: 76%; height: 88%; }
+
+/* ── Broadcast caption (bottom-left) ───────────────────── */
+.moment-caption {
+  position: fixed;
+  z-index: 4;
+  font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
+  font-weight: 400;
+  font-size: var(--cap-fs, 9px);
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.94);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.55s var(--ease);
+}
+.moment-caption.is-in { opacity: 1; transition-delay: 2.45s; }
+
+/* ── Buy button (Figma 7209:1463) ──────────────────────── */
+/* container = Frame 29 (223×40); left/top/size/font-size set by JS
+   from the video rect, so it scales + stays pinned in fullscreen.
+   Children use % of the container, matching the Figma ratios 1:1. */
+.buy {
+  position: fixed;
+  z-index: 4;
+  pointer-events: none; /* pill re-enables */
+}
+
+.buy-pill {
+  position: absolute;
+  left: 50%;
+  top: -20.8%;          /* -8.33 / 40 */
+  transform: translateX(-50%);
+  width: 94.6%;         /* 211 / 223 */
+  height: 72.5%;        /* 29 / 40 */
+  border-radius: 0.13em; /* ~1.96px at the 15px-equiv font size */
+  background: linear-gradient(to right, #0d1d42, #1129cc);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  /* hidden, revealed left→right last in the sequence */
+  clip-path: inset(0 100% 0 0);
+  transition: clip-path 0.55s cubic-bezier(0.65, 0, 0.35, 1);
+}
+.buy.is-in .buy-pill {
+  clip-path: inset(0 0 0 0);
+  transition-delay: 2.85s;
+  animation: buyGlow 1.7s ease 3.2s forwards; /* slight glow as it lands */
+}
+@keyframes buyGlow {
+  0%   { box-shadow: 0 0 0 0 rgba(90, 130, 255, 0); }
+  40%  { box-shadow: 0 0 16px 2px rgba(90, 130, 255, 0.6); }
+  100% { box-shadow: 0 0 7px 0 rgba(90, 130, 255, 0.22); }
+}
+.buy-pill:active { filter: brightness(1.12); }
+.buy-label {
+  font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
+  font-weight: 400;
+  font-size: 1em;            /* container font-size = 15px-equiv */
+  letter-spacing: 0.01em;    /* 0.15 / 15 */
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.94);
+  white-space: nowrap;
+}
+.buy-underline {
+  position: absolute;
+  bottom: 0;
+  left: 0;              /* spans the full pill width */
+  width: 100%;
+  height: 2px;          /* slightly thicker than Figma so it reads as a meter */
+  background: rgba(255, 255, 255, 0.92);
+  transform-origin: right center; /* depletes left→right (left edge moves right) */
+  transform: scaleX(1);
+}
+/* countdown timer: drains left→right over 6s once the button has fully landed
+   (wipe finishes at 3.40s after is-in trigger) */
+.buy.is-in .buy-underline {
+  animation: buyTimer 6s linear 3.4s forwards;
+}
+@keyframes buyTimer {
+  from { transform: scaleX(1); }
+  to   { transform: scaleX(0); }
+}
+.buy-logo {
+  position: absolute;
+  left: 93.7%;          /* 208.86 / 223 */
+  top: -4.5%;           /* -1.81 / 40 */
+  height: 72.9%;        /* 29.143 / 40 */
+  aspect-ratio: 1 / 1;
+  object-fit: contain;
+  pointer-events: none;
+  opacity: 0;
+  transform: scale(0.8);
+  transition: opacity 0.35s ease, transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.buy.is-in .buy-logo {
+  opacity: 1;
+  transform: scale(1);
+  transition-delay: 3.30s;
+}
+
+/* ── Control buttons (sound + fullscreen) ──────────────── */
+.ctl-btn {
+  position: fixed;
+  bottom: 22px;
+  width: 42px;
+  height: 42px;
+  border: 1px solid var(--hair);
+  border-radius: 50%;
+  background: rgba(11, 12, 14, 0.5);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  color: var(--ink);
+  font-size: 15px;
+  cursor: pointer;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.2s var(--ease);
+}
+.ctl-btn:hover { background: rgba(40, 40, 44, 0.6); }
+.ctl-btn svg { width: 17px; height: 17px; display: block; }
+#sound-btn { right: 18px; }
+#fs-btn { right: 68px; }
+@media (orientation: portrait) {
+  #fs-btn { display: none; }
+}

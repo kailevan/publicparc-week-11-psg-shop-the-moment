@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Shop the Moment — Editor (track Doué)</title>
+    <link rel="stylesheet" href="css/reset.css" />
+    <link rel="stylesheet" href="css/editor.css" />
+  </head>
+  <body>
+    <div class="editor-layout">
+
+      <div class="editor-viewport">
+        <div class="video-wrap" id="video-container">
+          <video id="video" src="assets/video/psg_goal.mp4" preload="auto" playsinline></video>
+          <canvas id="draw-overlay"></canvas>
+          <div class="editor-status" id="editor-status">Select Doué to start</div>
+        </div>
+
+        <div class="video-controls">
+          <button id="btn-step-back" title="Step back (←)">&#9664;&#9664;</button>
+          <button id="btn-play" title="Play/Pause (Space)">&#9654;</button>
+          <button id="btn-step-fwd" title="Step forward (→)">&#9654;&#9654;</button>
+          <span class="time-display" id="time-display">0:00.000</span>
+          <div class="scrubber" id="scrubber">
+            <div class="scrubber-fill" id="scrubber-fill">
+              <div class="scrubber-playhead"></div>
+            </div>
+            <div id="keyframe-markers"></div>
+          </div>
+          <span class="duration-display" id="duration-display">0:00</span>
+        </div>
+      </div>
+
+      <div class="editor-panel">
+        <div class="panel-section">
+          <h3>Player</h3>
+          <div id="looks-list"></div>
+          <button class="btn-add-look" id="btn-add-look">+ Add Player</button>
+        </div>
+
+        <div class="panel-section" style="flex:1;overflow-y:auto">
+          <h3>Keyframes</h3>
+          <p class="panel-hint" id="keyframe-hint">Select Doué, scrub to ~13s, then draw a box on him every few frames</p>
+          <div class="kf-list" id="keyframes-list"></div>
+        </div>
+
+        <div class="panel-section">
+          <h3>Shortcuts</h3>
+          <div class="shortcuts">
+            <span><kbd>Space</kbd> play/pause</span>
+            <span><kbd>←</kbd><kbd>→</kbd> step frame</span>
+            <span><kbd>Shift</kbd>+arrow = 1s</span>
+            <span><kbd>Cmd/Ctrl+Z</kbd> undo</span>
+            <span>Draw box = add keyframe</span>
+            <span>Double-click = rename</span>
+          </div>
+        </div>
+
+        <div class="panel-section">
+          <div class="panel-actions">
+            <button class="panel-btn" id="btn-undo" disabled>Undo</button>
+          </div>
+          <div class="panel-actions" style="margin-top:6px">
+            <button class="panel-btn" id="btn-export">Export</button>
+            <button class="panel-btn" id="btn-import">Import</button>
+          </div>
+          <div class="panel-actions" style="margin-top:6px">
+            <button class="panel-btn panel-btn--danger" id="btn-clear-data">Clear All Data</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <dialog id="json-dialog">
+      <h3 id="json-dialog-title">Export</h3>
+      <textarea id="json-textarea" spellcheck="false"></textarea>
+      <div class="dialog-actions">
+        <button id="btn-copy">Copy</button>
+        <button id="btn-dialog-import" style="display:none">Import</button>
+        <button id="btn-dialog-close">Close</button>
+      </div>
+    </dialog>
+
+    <script src="js/data.js"></script>
+    <script src="js/utils.js"></script>
+    <script src="js/editor.js"></script>
+  </body>
+</html>
