@@ -16,6 +16,7 @@
   <body>
 
     <div class="stage" id="stage">
+      <!-- starts muted so iOS allows autoplay, JS unmutes on first user gesture -->
       <video id="match-video" class="stage-video"
              src="assets/video/psg_goal.mp4"
              preload="auto" autoplay muted playsinline></video>
@@ -34,8 +35,23 @@
       <img class="buy-logo" src="assets/ui/psg-logo.png" alt="Paris Saint-Germain" />
     </div>
 
-    <button class="ctl-btn" id="fs-btn" title="Fullscreen" aria-label="Fullscreen"></button>
-    <button class="ctl-btn" id="sound-btn" title="Sound">🔇</button>
+    <!-- Cart icon (bottom-right, mirror of BUY) + drawer (slides up on tap) -->
+    <div class="cart" id="cart" role="button" aria-label="Cart">
+      <svg class="cart-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M5 7h14l-1.4 11.2a1.5 1.5 0 0 1-1.5 1.3H7.9a1.5 1.5 0 0 1-1.5-1.3L5 7Z"/>
+        <path d="M8.5 7V5.5a3.5 3.5 0 0 1 7 0V7"/>
+      </svg>
+      <span class="cart-count" id="cart-count">0</span>
+    </div>
+
+    <div class="cart-drawer" id="cart-drawer" aria-hidden="true">
+      <div class="drawer-head">YOUR BAG</div>
+      <div class="drawer-items" id="drawer-items">
+        <div class="drawer-empty">Empty</div>
+      </div>
+      <button class="drawer-checkout" type="button">CHECKOUT</button>
+    </div>
 
     <!-- order matters: utils → data → products → experience -->
     <script src="js/utils.js"></script>

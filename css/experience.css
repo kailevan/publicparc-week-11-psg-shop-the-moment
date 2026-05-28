@@ -52,54 +52,78 @@ html, body {
 
 /* ── Product pills (left vertical stack — Figma 7209-1450) ─ */
 /* left/top + size vars are set by JS so the stack hugs the
-   video's left edge and scales with the contained video. */
+   video's left edge and scales with the contained video.
+   Pills are ABSOLUTELY positioned (top set inline by JS per index) so
+   a tapped pill stays in place and just transitions its top/height/width
+   when expanding — no flex-collapse jump to the top of the column. */
 .pills {
   position: fixed;
   z-index: 4;
-  display: flex;
-  flex-direction: column;
-  gap: var(--pill-gap, 3px);
   pointer-events: none; /* children re-enable */
 }
 .pill {
-  position: relative;
+  position: absolute;
+  left: 0;
+  /* top set inline by layoutPills */
   width: var(--pill-w, 68px);
   height: var(--pill-h, 73px);
   border-radius: var(--pill-rad, 6px);
   background: rgba(2, 8, 80, 0.85); /* PSG deep navy */
-  display: flex;
-  align-items: center;
-  justify-content: center;
   overflow: hidden;
   pointer-events: auto;
   cursor: pointer;
   opacity: 0;
   transform: scale(0.6);
-  transition: transform 0.42s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.28s ease;
   -webkit-tap-highlight-color: transparent;
+  /* Separate transition longhand so the entry delays (set via .is-in below)
+     apply ONLY to transform + opacity. Otherwise width/height/top inherit
+     the 1.7-2.0s entry stagger and the expand-on-tap appears frozen. */
+  transition-property: transform, opacity, width, height, top, border-radius;
+  transition-duration: 0.42s, 0.28s, 0.28s, 0.28s, 0.28s, 0.28s;
+  transition-timing-function:
+    cubic-bezier(0.34, 1.56, 0.64, 1),
+    ease,
+    cubic-bezier(0.65, 0, 0.35, 1),
+    cubic-bezier(0.65, 0, 0.35, 1),
+    cubic-bezier(0.65, 0, 0.35, 1),
+    ease;
+  transition-delay: 0s, 0s, 0s, 0s, 0s, 0s;
 }
+/* Image/video absolute at the TOP of the pill — stays stuck to the top
+   as the pill grows (no centering-drift). Width/height are %-of-pill so
+   the image scales WITH the pill, until it hits the max cap; then the
+   pill keeps growing past it (leaves room below for PDP content). */
 .pill img,
 .pill video {
+  position: absolute;
+  top: 11%;
+  left: 50%;
+  transform: translateX(-50%);
   width: 67.1%;   /* 45.652 / 68.017 */
   height: 77.25%; /* 56.289 / 72.875 */
+  max-width: var(--img-max-w, 100%);
+  max-height: var(--img-max-h, 100%);
   object-fit: contain;
-  /* real product cutouts read cleanest shown normally; screen-blend
-     (Figma's white-render trick) ghosts the navy kit items out */
   display: block;
 }
 .pill:active { transform: scale(0.95); }
 
 /* per-pill .is-in so we can stagger entry AND exit independently
-   (parent class made parent-driven exits unstaggerable) */
+   (parent class made parent-driven exits unstaggerable).
+   Delay is applied PER-PROPERTY so only transform + opacity stagger;
+   width/height/top stay at 0s so tap-to-expand fires instantly. */
 .pill.is-in { opacity: 1; transform: scale(1); }
-.pill:nth-child(1).is-in { transition-delay: 1.70s; } /* entry: top → middle → bottom */
-.pill:nth-child(2).is-in { transition-delay: 1.85s; }
-.pill:nth-child(3).is-in { transition-delay: 2.00s; }
+.pill:nth-child(1).is-in { transition-delay: 1.70s, 1.70s, 0s, 0s, 0s, 0s; } /* entry: top → middle → bottom */
+.pill:nth-child(2).is-in { transition-delay: 1.85s, 1.85s, 0s, 0s, 0s, 0s; }
+.pill:nth-child(3).is-in { transition-delay: 2.00s, 2.00s, 0s, 0s, 0s, 0s; }
 
 /* per-product visual sizing inside the pill — shorts a touch smaller,
    shirt a touch bigger; boots use the default */
 .pill[data-product-id="shorts"] img,
-.pill[data-product-id="shorts"] video { width: 60%; height: 70%; }
+.pill[data-product-id="shorts"] video { width: 60%; height: 70%; top: 17%; }
+/* In the expanded PDP, lift the shorts up so it doesn't sit too low in the card */
+.pill[data-product-id="shorts"].is-expanded img,
+.pill[data-product-id="shorts"].is-expanded video { top: 5%; }
 .pill[data-product-id="shirt"]  img,
 .pill[data-product-id="shirt"]  video { width: 76%; height: 88%; }
 
@@ -235,3 +259,335 @@ html, body {
 @media (orientation: portrait) {
   #fs-btn { display: none; }
 }
+
+/* ──────────────────────────────────────────────────────────
+   Shop-mode additions:
+   tap a pill → it morphs into a small PDP card. While open:
+   timer pauses, caption hides, BUY-NOW banner stays as is.
+   ────────────────────────────────────────────────────────── */
+
+/* Pause the countdown bar while a PDP is open (resumes on close) */
+.buy.is-paused .buy-underline { animation-play-state: paused; }
+
+/* Caption hides while shopping (product name now lives in the card) */
+.moment-caption.is-hidden { opacity: 0; transition: opacity 0.25s var(--ease); }
+
+/* ── PDP content sitting INSIDE each pill ─────────────────
+   Hidden + non-interactive until the pill is .is-expanded.
+   Sizes scale off the container font-size which JS sets per-pill. */
+.pdp {
+  position: absolute;
+  left: 0; right: 0; top: 0; bottom: 0;
+  /* top padding leaves room for the rotating video above */
+  padding: 12.3em 0.7em 0.7em;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  opacity: 0;
+  pointer-events: none;
+  /* fast fade-OUT (no delay); fade-IN is overridden in .is-expanded below */
+  transition: opacity 0.12s ease;
+  font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
+  color: rgba(255, 255, 255, 0.94);
+}
+.pill.is-expanded .pdp {
+  opacity: 1;
+  pointer-events: auto;
+  /* fade IN: slower + delayed so it appears as the morph completes */
+  transition: opacity 0.22s ease 0.22s;
+}
+
+.pdp-name {
+  font-size: 0.88em;
+  font-weight: 500;
+  line-height: 1.18;
+  letter-spacing: 0.005em;
+  margin: 0 0 0.35em;
+  /* clamp to 2 lines */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.pdp-price {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45em;
+  margin-bottom: 0.55em;
+}
+.price-was {
+  font-size: 0.82em;
+  color: rgba(255, 255, 255, 0.45);
+  text-decoration: line-through;
+}
+.price-now {
+  font-size: 1.05em;
+  font-weight: 600;
+  color: #fff;
+}
+
+/* ── Single-row stage: chips + ATC in one flex row ───────
+   Step 1: chips centered, ATC collapsed (max-width:0, invisible).
+   Step 2 (.pdp.is-picked): non-selected chips collapse (max-width:0,
+   no padding/margin), ATC grows in (max-width:100% + flex-grow:1),
+   selected chip slides to the leftmost slot as the row reflows. */
+.pdp-stage {
+  position: relative;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+}
+
+.size-chip {
+  flex: 0 0 auto;
+  min-width: 2.2em;
+  height: 1.95em;
+  padding: 0 0.5em;
+  margin-right: 0.32em;
+  font: 500 0.85em/1.95em "Inter", "Helvetica Neue", Arial, sans-serif;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.92);
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 0.2em;
+  white-space: nowrap;
+  overflow: hidden;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    max-width 0.32s cubic-bezier(0.65, 0, 0.35, 1),
+    min-width 0.32s cubic-bezier(0.65, 0, 0.35, 1),
+    padding 0.32s ease,
+    margin 0.32s ease,
+    border-width 0.2s ease,
+    opacity 0.22s ease,
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+.size-chip:hover  { border-color: rgba(255, 255, 255, 0.55); }
+.size-chip:active { transform: scale(0.94); }
+.size-chip.is-selected {
+  background: linear-gradient(to right, #0d1d42, #1129cc);
+  border-color: rgba(255, 255, 255, 0.5);
+  color: #fff;
+}
+
+/* Boots get 8 chips — squeeze a bit so they all fit one row */
+.pill[data-product-id="boots"] .size-chip {
+  min-width: 1.7em;
+  padding: 0 0.32em;
+  margin-right: 0.22em;
+  font-size: 0.78em;
+}
+
+/* Step 2: collapse non-selected chips entirely */
+.pdp.is-picked .size-chip:not(.is-selected) {
+  max-width: 0;
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  border-left-width: 0;
+  border-right-width: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ATC: lives in the same row. Step 1 = collapsed; Step 2 = fills the rest. */
+.pdp-atc {
+  flex: 1 1 0;
+  align-self: center;
+  height: 2.3em;
+  max-width: 0;
+  padding: 0;
+  font: 600 0.95em/2.3em "Inter", "Helvetica Neue", Arial, sans-serif;
+  letter-spacing: 0.06em;
+  text-align: center;
+  color: #fff;
+  background: linear-gradient(to right, #0d1d42, #1129cc);
+  border: 0;
+  border-radius: 0.2em;
+  white-space: nowrap;
+  overflow: hidden;
+  opacity: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    max-width 0.38s cubic-bezier(0.65, 0, 0.35, 1),
+    padding 0.38s ease,
+    opacity 0.22s ease 0.06s,
+    filter 0.15s ease;
+}
+.pdp.is-picked .pdp-atc {
+  max-width: 100%;
+  padding: 0 0.5em;
+  opacity: 1;
+}
+.pdp-atc:hover  { filter: brightness(1.08); }
+.pdp-atc:active { filter: brightness(0.9); }
+.pdp-atc.is-added {
+  background: rgba(255, 255, 255, 0.96);
+  color: #0d1d42;
+}
+
+/* ── Expansion / collapse mechanics ─────────────────────── */
+/* Tapped pill morphs to the full column geometry (top:0 + pdp dims).
+   The image inside follows the pill until it hits --img-max-h. */
+.pill.is-expanded {
+  top: 0 !important;
+  width:  var(--pdp-w, 220px) !important;
+  height: var(--pdp-h, 234px) !important;
+  border-radius: 0.7em;
+  z-index: 5;
+}
+/* Other pills just fade where they are (no layout shift — they're absolute) */
+.pills.is-shopping .pill:not(.is-expanded) {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+
+/* ── Cart icon (bottom-right) ───────────────────────────── */
+.cart {
+  position: fixed;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--cart-size, 40px);
+  height: var(--cart-size, 40px);
+  border-radius: 50%;
+  background: linear-gradient(to right, #0d1d42, #1129cc);
+  color: rgba(255, 255, 255, 0.95);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  opacity: 0;
+  transform: translateY(40%);
+  transition: opacity 0.5s var(--ease), transform 0.6s var(--ease);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+}
+.cart.is-in { opacity: 1; transform: translateY(0); transition-delay: 2.5s; }
+.cart-icon { width: 55%; height: 55%; display: block; }
+.cart-count {
+  position: absolute;
+  top: -4px; right: -4px;
+  min-width: 1.05em;
+  height: 1.05em;
+  padding: 0 0.25em;
+  font: 500 0.62em "Inter", sans-serif;
+  line-height: 1.05em;
+  text-align: center;
+  color: #0d1d42;
+  background: #fff;
+  border-radius: 999px;
+  letter-spacing: 0;
+  opacity: 0;
+  transform: scale(0.6);
+  transition: opacity 0.2s ease, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.cart.has-items .cart-count {
+  opacity: 1;
+  transform: scale(1);
+}
+.cart.bump .cart-count { animation: cartBump 0.45s cubic-bezier(0.34, 1.56, 0.64, 1); }
+@keyframes cartBump {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.45); }
+  100% { transform: scale(1); }
+}
+
+/* ── Cart drawer (slides up from bottom-right) ──────────── */
+.cart-drawer {
+  position: fixed;
+  z-index: 6;
+  right: 14px;
+  bottom: 14px;
+  width: 260px;
+  max-height: 70vh;
+  padding: 14px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  background: rgba(2, 8, 80, 0.92);
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
+  color: rgba(255, 255, 255, 0.94);
+  opacity: 0;
+  transform: translateY(20px) scale(0.96);
+  transform-origin: bottom right;
+  pointer-events: none;
+  transition: opacity 0.3s var(--ease), transform 0.35s var(--ease);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.5);
+}
+.cart-drawer.is-open {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+.drawer-head {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  color: rgba(255, 255, 255, 0.6);
+  margin-bottom: 10px;
+}
+.drawer-items {
+  overflow-y: auto;
+  margin-bottom: 12px;
+  -webkit-overflow-scrolling: touch;
+}
+.drawer-empty {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.4);
+  padding: 14px 0;
+  text-align: center;
+}
+.drawer-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.drawer-item:last-child { border-bottom: 0; }
+.drawer-item-img {
+  width: 42px; height: 42px;
+  object-fit: contain;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  flex: 0 0 auto;
+}
+.drawer-item-text { min-width: 0; flex: 1 1 auto; }
+.drawer-item-name {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.drawer-item-meta {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.55);
+  margin-top: 2px;
+  letter-spacing: 0.02em;
+}
+.drawer-checkout {
+  width: 100%;
+  height: 34px;
+  font: 500 11px "Inter", sans-serif;
+  letter-spacing: 0.12em;
+  color: #fff;
+  background: linear-gradient(to right, #0d1d42, #1129cc);
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.drawer-checkout:hover { filter: brightness(1.08); }

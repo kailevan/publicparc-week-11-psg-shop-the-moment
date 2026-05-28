@@ -1,16 +1,28 @@
 /**
  * products.js — the three products revealed at the spotlight moment.
  *
- * Image-only pills, stacked top→bottom on the left (tap behaviour parked).
- * `name` feeds the broadcast caption — prefixed with "D.DOUÉ" at render.
+ * Each product carries the data its PDP card needs:
+ *   name      → product title + "D.DOUÉ" caption prefix
+ *   img       → rotating turntable thumbnail (animated WebP w/ alpha)
+ *   priceWas  → real PSG/Nike retail (€)
+ *   price     → after the BUY-NOW 10% off
+ *   sizes     → tap-able size chips inside the PDP
+ *   defaultSize → pre-selected on open so ATC is one-tap
  */
 
 window.App = window.App || {};
 
+const APPAREL = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
+const BOOTS   = ['39', '40', '41', '42', '43', '44', '45', '46'];
+
 App.products = [
-  { id: 'shirt',  name: 'PSG Home Stadium Shirt 2026/27',  img: 'assets/products/shirt.webp' },
-  /* shorts turntable = animated WebP with alpha — renders as a plain <img>
-     so iOS doesn't refuse autoplay and no codec quirks like HEVC alpha. */
-  { id: 'shorts', name: 'PSG Home Stadium Shorts 2026/27', img: 'assets/products/shorts.webp' },
-  { id: 'boots',  name: 'Match Boots',                     img: 'assets/products/boots.webp' }
+  { id: 'shirt',  name: 'PSG Home Stadium Shirt 2026/27',
+    img: 'assets/products/shirt.webp',
+    priceWas: 90,  price: 81,  sizes: APPAREL, defaultSize: 'M' },
+  { id: 'shorts', name: 'PSG Home Stadium Shorts 2026/27',
+    img: 'assets/products/shorts.webp',
+    priceWas: 55,  price: 49,  sizes: APPAREL, defaultSize: 'M' },
+  { id: 'boots',  name: 'Nike Mercurial Superfly 10 Elite',
+    img: 'assets/products/boots.webp',
+    priceWas: 280, price: 252, sizes: BOOTS,   defaultSize: '42' }
 ];

@@ -21,11 +21,18 @@
   const PAD = 1.2;               // clear pocket hugs his box with a little margin
   const STOPS = 16;              // gradient stops — more = smoother veil
 
-  let video, stage, dim, pillsWrap, caption, buy;
+  let video, stage, dim, pillsWrap, caption, buy, cart, cartCount, drawer, drawerItems;
   let doue = null;
   let lastBox = null;
   let revealed = false;
   let spotDone = false;
+
+  // ── Shop state ───────────────────────────────────────
+  let expandedPill = null;          // .pill element currently expanded
+  const selectedSize = {};          // { productId: 'M' } — chip user picked
+  const cartItems = [];             // [{ productId, size }] in order added
+  let pauseStart = null;            // video.currentTime when PDP opened
+  let totalPaused = 0;              // accumulated paused seconds (defers SPOTLIGHT_END)
 
   // ── Data ─────────────────────────────────────────────
   function loadLooks() {
@@ -87,15 +94,153 @@
         document.addEventListener('click', kick, { once: false, capture: true });
         el.appendChild(v);
       } else {
-        el.innerHTML = '<img src="' + p.img + '" alt="' + (p.name || '') + '">';
+        const img = document.createElement('img');
+        img.src = p.img;
+        img.alt = p.name || '';
+        el.appendChild(img);
+      }
+      // PDP content (hidden until pill is expanded) — single-row morph:
+      //   Step 1: all chips visible, centered. ATC collapsed (max-width:0).
+      //   Step 2 (.pdp.is-picked): non-selected chips collapse, ATC expands,
+      //   selected chip slides left as the row reflows. Tap the selected chip
+      //   again → step 1.
+      if (p.sizes && p.sizes.length) {
+        selectedSize[p.id] = p.defaultSize || p.sizes[0];
+        const pdp = document.createElement('div');
+        pdp.className = 'pdp';
+        pdp.innerHTML =
+          '<div class="pdp-name">' + escapeHtml(p.name) + '</div>' +
+          '<div class="pdp-price">' +
+            (p.priceWas ? '<span class="price-was">€' + p.priceWas + '</span>' : '') +
+            '<span class="price-now">€' + p.price + '</span>' +
+          '</div>' +
+          '<div class="pdp-stage">' +
+            p.sizes.map(s =>
+              '<button type="button" class="size-chip" data-size="' + s + '">' + s + '</button>'
+            ).join('') +
+            '<button type="button" class="pdp-atc">ADD TO CART</button>' +
+          '</div>';
+        el.appendChild(pdp);
+
+        // chip click:
+        //   - in step 2, tap on the SELECTED chip = go back to step 1
+        //   - otherwise = mark chip selected and advance to step 2
+        pdp.querySelectorAll('.size-chip').forEach(chip => {
+          chip.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (pdp.classList.contains('is-picked') && chip.classList.contains('is-selected')) {
+              pdp.classList.remove('is-picked');
+              return;
+            }
+            pdp.querySelectorAll('.size-chip').forEach(c => c.classList.remove('is-selected'));
+            chip.classList.add('is-selected');
+            selectedSize[p.id] = chip.dataset.size;
+            pdp.classList.add('is-picked');
+          });
+        });
+
+        // ATC → add + close
+        const atc = pdp.querySelector('.pdp-atc');
+        atc.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (atc.classList.contains('is-added')) return;
+          atc.classList.add('is-added');
+          atc.textContent = 'ADDED ✓';
+          addToCart(p.id, selectedSize[p.id]);
+          setTimeout(() => {
+            closePDP();
+            setTimeout(() => {
+              atc.classList.remove('is-added');
+              atc.textContent = 'ADD TO CART';
+            }, 500);
+          }, 600);
+        });
       }
       // caption follows the focused pill; defaults to the first product
       const focus = () => setCaption(p.name);
       el.addEventListener('pointerenter', focus);
       el.addEventListener('touchstart', focus, { passive: true });
+      // tap pill = open its PDP (if not already expanded)
+      el.addEventListener('click', (e) => {
+        if (el.classList.contains('is-expanded')) return; // tap inside the card → no-op (children stopPropagation their own)
+        e.stopPropagation();
+        openPDP(el);
+      });
       pillsWrap.appendChild(el);
     }
     if (prods.length) setCaption(prods[0].name);
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[c]);
+  }
+
+  // ── PDP open / close ────────────────────────────────
+  function openPDP(pillEl) {
+    if (expandedPill === pillEl) return;
+    if (expandedPill) closePDP();
+    expandedPill = pillEl;
+    pillsWrap.classList.add('is-shopping');
+    pillEl.classList.add('is-expanded');
+    if (caption) caption.classList.add('is-hidden');
+    if (buy) buy.classList.add('is-paused');           // freeze the countdown bar
+    pauseStart = video.currentTime;                    // defer the SPOTLIGHT_END check
+  }
+  function closePDP() {
+    if (!expandedPill) return;
+    // Reset PDP to step 1 (size picker) for the next open. Wait until after
+    // the close transitions so the user doesn't see the swap mid-animation.
+    const pdp = expandedPill.querySelector('.pdp');
+    expandedPill.classList.remove('is-expanded');
+    if (pdp) setTimeout(() => {
+      pdp.classList.remove('is-picked');
+      pdp.querySelectorAll('.size-chip').forEach(c => c.classList.remove('is-selected'));
+    }, 320);
+    expandedPill = null;
+    pillsWrap.classList.remove('is-shopping');
+    if (caption) caption.classList.remove('is-hidden'); // restore caption
+    if (buy) buy.classList.remove('is-paused');         // resume timer
+    if (pauseStart !== null) {                          // bank the paused duration
+      totalPaused += Math.max(0, video.currentTime - pauseStart);
+      pauseStart = null;
+    }
+  }
+
+  // ── Cart ────────────────────────────────────────────
+  function addToCart(productId, size) {
+    cartItems.push({ productId, size });
+    renderCart();
+    if (cart) {
+      cart.classList.add('has-items', 'bump');
+      setTimeout(() => cart.classList.remove('bump'), 480);
+    }
+  }
+  function renderCart() {
+    if (cartCount) cartCount.textContent = cartItems.length;
+    if (!drawerItems) return;
+    if (!cartItems.length) {
+      drawerItems.innerHTML = '<div class="drawer-empty">Empty</div>';
+      return;
+    }
+    const byId = id => (App.products || []).find(p => p.id === id);
+    drawerItems.innerHTML = cartItems.map(it => {
+      const p = byId(it.productId); if (!p) return '';
+      return '<div class="drawer-item">' +
+        '<img class="drawer-item-img" src="' + p.img + '" alt="">' +
+        '<div class="drawer-item-text">' +
+          '<div class="drawer-item-name">' + escapeHtml(p.name) + '</div>' +
+          '<div class="drawer-item-meta">Size ' + it.size + ' · €' + p.price + '</div>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+  }
+  function toggleDrawer(force) {
+    if (!drawer) return;
+    const open = force !== undefined ? force : !drawer.classList.contains('is-open');
+    drawer.classList.toggle('is-open', open);
+    drawer.setAttribute('aria-hidden', open ? 'false' : 'true');
   }
 
   // Pin the pill stack + caption to the video's left edge and scale them
@@ -108,10 +253,22 @@
     const rad = pw * 0.0874;        // 5.942 / 68.017
     pillsWrap.style.left = (v.x + v.width * 0.0344) + 'px'; // 23 / 668.89
     pillsWrap.style.top  = (v.y + v.height * 0.202) + 'px'; // 76 / 376.25
+    pillsWrap.style.width = pw + 'px';                       // container hugs the column
+    pillsWrap.style.height = (3 * ph + 2 * gap) + 'px';
     pillsWrap.style.setProperty('--pill-w', pw + 'px');
     pillsWrap.style.setProperty('--pill-h', ph + 'px');
     pillsWrap.style.setProperty('--pill-gap', gap + 'px');
     pillsWrap.style.setProperty('--pill-rad', rad + 'px');
+    // Position each pill absolutely so a tapped pill stays in place
+    // and only changes its top/height/width when expanding (no jump-to-top).
+    const pillEls = pillsWrap.querySelectorAll('.pill');
+    pillEls.forEach((p, i) => {
+      // only set the BASE top — .pill.is-expanded overrides via CSS
+      if (!p.classList.contains('is-expanded')) {
+        p.style.top = (i * (ph + gap)) + 'px';
+      }
+      p.dataset.baseTop = (i * (ph + gap));
+    });
     if (caption) {
       caption.style.left = (v.x + v.width * 0.0373) + 'px';  // ~25 / 668.89
       caption.style.top  = (v.y + v.height * 0.822) + 'px';  // 309.51 / 376.25
@@ -123,6 +280,27 @@
       buy.style.width = (v.width * 0.3334) + 'px';         // 223 / 668.89
       buy.style.height = (v.height * 0.10631) + 'px';      // 40 / 376.25
       buy.style.fontSize = (v.height * 0.03987) + 'px';    // 15 / 376.25
+    }
+    // Expanded-PDP target size — same ratio as a mini thumb,
+    // height = full 3-pill column. Font size scales the card's interior.
+    const columnH = v.height * 0.597;                        // 3 pills + 2 gaps (Figma)
+    const pdpH    = columnH;
+    const pdpW    = pdpH * 0.93;                             // pill aspect 68/73
+    pillsWrap.style.setProperty('--pdp-w', pdpW + 'px');
+    pillsWrap.style.setProperty('--pdp-h', pdpH + 'px');
+    // Cap the rotating image so the expanded card has room for content below.
+    // (Mini pill: 77% of 73 ≈ 56px, never hits cap. Expanded: caps at ~50% of card.)
+    pillsWrap.style.setProperty('--img-max-h', (pdpH * 0.5) + 'px');
+    pillsWrap.style.setProperty('--img-max-w', (pdpW * 0.85) + 'px');
+    // 1em inside the card ≈ 12px on phone (scales w/ video height) — drives all PDP text
+    pillsWrap.style.setProperty('font-size', (v.height * 0.031) + 'px');
+    // Cart icon: bottom-right, mirroring the BUY banner position
+    if (cart) {
+      const cs = v.height * 0.106;                           // similar size to BUY pill height
+      cart.style.setProperty('--cart-size', cs + 'px');
+      cart.style.left = (v.x + v.width - cs - v.width * 0.0239) + 'px';
+      cart.style.top  = (v.y + v.height - cs - v.height * (1 - 0.885 - 0.10631)) + 'px';
+      cart.style.fontSize = (v.height * 0.06) + 'px';        // drives count/icon size scaling
     }
   }
 
@@ -189,13 +367,17 @@
       pillsWrap.querySelectorAll('.pill').forEach(p => p.classList.add('is-in'));
       if (caption) caption.classList.add('is-in');
       if (buy) buy.classList.add('is-in');
+      if (cart) cart.classList.add('is-in');
     }
 
-    // timer hits zero → orchestrated exit: BUY button first, then pills
-    // exit bottom→top (reverse of how they came in), caption fades with them, veil last.
-    if (revealed && !spotDone && t >= SPOTLIGHT_END) {
+    // timer hits zero (minus any paused-shopping time) → orchestrated exit:
+    // BUY button + cart first, then pills bottom→top, caption with them, veil last.
+    // If a PDP is open, the check defers (pauseStart frozen, totalPaused not yet banked).
+    const elapsed = (pauseStart !== null) ? (pauseStart - totalPaused) : (t - totalPaused);
+    if (revealed && !spotDone && elapsed >= SPOTLIGHT_END) {
       spotDone = true;
       if (buy) buy.classList.remove('is-in');                          // buy wipes back right→left
+      if (cart) cart.classList.remove('is-in');                        // cart slides back down
       setTimeout(() => {
         if (caption) caption.classList.remove('is-in');                // caption fades w/ first pill
         const pillEls = pillsWrap.querySelectorAll('.pill');
@@ -221,29 +403,6 @@
     requestAnimationFrame(render);
   }
 
-  // ── Fullscreen ───────────────────────────────────────
-  const ICON_EXPAND = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>';
-  const ICON_COMPRESS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>';
-  function fsElement() { return document.fullscreenElement || document.webkitFullscreenElement || null; }
-
-  function setupFullscreen() {
-    const btn = document.getElementById('fs-btn');
-    if (!btn) return;
-    const sync = () => { btn.innerHTML = fsElement() ? ICON_COMPRESS : ICON_EXPAND; };
-    sync();
-    const pageFs = document.fullscreenEnabled || document.webkitFullscreenEnabled;
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const el = document.documentElement;
-      if (pageFs) {
-        if (!fsElement()) (el.requestFullscreen || el.webkitRequestFullscreen || function () {}).call(el);
-        else (document.exitFullscreen || document.webkitExitFullscreen || function () {}).call(document);
-      }
-    });
-    document.addEventListener('fullscreenchange', sync);
-    document.addEventListener('webkitfullscreenchange', sync);
-  }
-
   // ── Init ─────────────────────────────────────────────
   function init() {
     video = document.getElementById('match-video');
@@ -252,11 +411,29 @@
     pillsWrap = document.getElementById('pills');
     caption = document.getElementById('caption');
     buy = document.getElementById('buy');
+    cart = document.getElementById('cart');
+    cartCount = document.getElementById('cart-count');
+    drawer = document.getElementById('cart-drawer');
+    drawerItems = document.getElementById('drawer-items');
 
     loadLooks();
     buildPills();
+    renderCart();
     layoutPills();
-    setupFullscreen();
+
+    // Cart icon → toggle drawer (don't bubble to stage)
+    if (cart) cart.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleDrawer();
+    });
+    if (drawer) drawer.addEventListener('click', (e) => e.stopPropagation());
+    const checkout = drawer && drawer.querySelector('.drawer-checkout');
+    if (checkout) checkout.addEventListener('click', (e) => {
+      e.stopPropagation();
+      // visual-only checkout per spec — flash the button
+      checkout.textContent = 'THANK YOU ✓';
+      setTimeout(() => { checkout.textContent = 'CHECKOUT'; toggleDrawer(false); }, 900);
+    });
 
     // Keep the overlay pinned + scaled to the video at any size — incl.
     // fullscreen, which doesn't reliably fire 'resize' everywhere.
@@ -273,19 +450,36 @@
     pillsWrap.addEventListener('click', (e) => e.stopPropagation());
     if (buy) buy.addEventListener('click', (e) => e.stopPropagation());
 
-    const soundBtn = document.getElementById('sound-btn');
-    if (soundBtn) {
-      soundBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        video.muted = !video.muted;
-        soundBtn.textContent = video.muted ? '🔇' : '🔊';
-        if (!video.muted) video.play().catch(() => {});
-      });
-    }
+    // Sound on by default: try to unmute right away; if iOS blocks it (autoplay
+    // policy), unmute on the very first user gesture and never re-mute.
+    video.volume = 1;
+    const tryUnmute = () => {
+      if (!video.muted) return;
+      video.muted = false;
+      video.play().catch(() => { video.muted = true; });
+    };
+    tryUnmute();
+    const armUnmute = () => {
+      tryUnmute();
+      if (!video.muted) {
+        document.removeEventListener('click', armUnmute, true);
+        document.removeEventListener('touchstart', armUnmute, true);
+      }
+    };
+    document.addEventListener('click', armUnmute, true);
+    document.addEventListener('touchstart', armUnmute, true);
 
-    // tap empty space = replay the whole moment from the top (re-record takes)
+    // tap empty space:
+    //   1) if cart drawer is open → close it
+    //   2) else if a PDP is expanded → close it (spec: tap outside the card)
+    //   3) else → replay the whole moment from the top
     stage.addEventListener('click', () => {
+      if (drawer && drawer.classList.contains('is-open')) { toggleDrawer(false); return; }
+      if (expandedPill) { closePDP(); return; }
       revealed = false; spotDone = false;
+      pauseStart = null; totalPaused = 0;                              // reset shop-pause offset
+      cartItems.length = 0; renderCart();                              // empty cart for a fresh take
+      if (cart) cart.classList.remove('has-items', 'is-in');
       dim.classList.remove('is-on');
       dim.style.background = '';
       pillsWrap.querySelectorAll('.pill').forEach(p => p.classList.remove('is-in'));
