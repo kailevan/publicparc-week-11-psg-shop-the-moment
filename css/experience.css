@@ -108,24 +108,22 @@ html, body {
 }
 .pill:active { transform: scale(0.95); }
 
-/* per-pill .is-in so we can stagger entry AND exit independently
-   (parent class made parent-driven exits unstaggerable).
-   Delay is applied PER-PROPERTY so only transform + opacity stagger;
-   width/height/top stay at 0s so tap-to-expand fires instantly. */
-.pill.is-in { opacity: 1; transform: scale(1); }
-.pill:nth-child(1).is-in { transition-delay: 1.70s, 1.70s, 0s, 0s, 0s, 0s; } /* entry: top → middle → bottom */
-.pill:nth-child(2).is-in { transition-delay: 1.85s, 1.85s, 0s, 0s, 0s, 0s; }
-.pill:nth-child(3).is-in { transition-delay: 2.00s, 2.00s, 0s, 0s, 0s, 0s; }
+/* Entry pop. The STAGGER is JS-scheduled (per-pill setTimeout), so the
+   CSS animation has no delay — it fires the moment .is-in is added.
+   This avoids the "pre-delay flash" where browsers briefly render the
+   static .is-in styles before the animation's backwards-fill takes hold. */
+.pill.is-in { opacity: 1; transform: scale(1); animation: pillPop 0.42s cubic-bezier(0.34, 1.56, 0.64, 1) backwards; }
+@keyframes pillPop {
+  from { opacity: 0; transform: scale(0.6); }
+  to   { opacity: 1; transform: scale(1);   }
+}
 
 /* per-product visual sizing inside the pill — shorts a touch smaller,
    shirt a touch bigger; boots use the default */
 .pill[data-product-id="shorts"] img,
-.pill[data-product-id="shorts"] video { width: 60%; height: 70%; top: 17%; }
-/* In the expanded PDP, lift the shorts up so it doesn't sit too low in the card */
-.pill[data-product-id="shorts"].is-expanded img,
-.pill[data-product-id="shorts"].is-expanded video { top: 5%; }
+.pill[data-product-id="shorts"] video { width: 63%; height: 73.5%; top: 17%; }
 .pill[data-product-id="shirt"]  img,
-.pill[data-product-id="shirt"]  video { width: 76%; height: 88%; }
+.pill[data-product-id="shirt"]  video { width: 80%; height: 92.4%; }
 
 /* ── Broadcast caption (bottom-left) ───────────────────── */
 .moment-caption {
@@ -142,7 +140,7 @@ html, body {
   opacity: 0;
   transition: opacity 0.55s var(--ease);
 }
-.moment-caption.is-in { opacity: 1; transition-delay: 2.45s; }
+.moment-caption.is-in { opacity: 1; } /* entry scheduled by JS, no transition-delay */
 
 /* ── Buy button (Figma 7209:1463) ──────────────────────── */
 /* container = Frame 29 (223×40); left/top/size/font-size set by JS
@@ -176,8 +174,8 @@ html, body {
 }
 .buy.is-in .buy-pill {
   clip-path: inset(0 0 0 0);
-  transition-delay: 2.85s;
-  animation: buyGlow 1.7s ease 3.2s forwards; /* slight glow as it lands */
+  /* internal stagger relative to .is-in add; outer reveal time is JS-scheduled */
+  animation: buyGlow 1.7s ease 0.35s forwards;
 }
 @keyframes buyGlow {
   0%   { box-shadow: 0 0 0 0 rgba(90, 130, 255, 0); }
@@ -202,12 +200,16 @@ html, body {
   height: 2px;          /* slightly thicker than Figma so it reads as a meter */
   background: rgba(255, 255, 255, 0.92);
   transform-origin: right center; /* depletes left→right (left edge moves right) */
-  transform: scaleX(1);
+  /* base = empty (scaleX 0); the animation's `both` fill-mode supplies the
+     "full" state during the 3.4s pre-delay AND keeps "empty" after the bar
+     drains, so removing .is-in on exit doesn't snap it back to full. */
+  transform: scaleX(0);
 }
 /* countdown timer: drains left→right over 6s once the button has fully landed
-   (wipe finishes at 3.40s after is-in trigger) */
+   (wipe finishes 0.55s after .is-in). `both` keeps the full bar during the
+   pre-delay AND the empty state after, so exits don't snap back to full. */
 .buy.is-in .buy-underline {
-  animation: buyTimer 6s linear 3.4s forwards;
+  animation: buyTimer 6s linear 0.55s both;
 }
 @keyframes buyTimer {
   from { transform: scaleX(1); }
@@ -228,7 +230,7 @@ html, body {
 .buy.is-in .buy-logo {
   opacity: 1;
   transform: scale(1);
-  transition-delay: 3.30s;
+  transition-delay: 0.45s; /* after the pill wipes in */
 }
 
 /* ── Control buttons (sound + fullscreen) ──────────────── */
@@ -272,30 +274,56 @@ html, body {
 /* Caption hides while shopping (product name now lives in the card) */
 .moment-caption.is-hidden { opacity: 0; transition: opacity 0.25s var(--ease); }
 
-/* ── PDP content sitting INSIDE each pill ─────────────────
-   Hidden + non-interactive until the pill is .is-expanded.
-   Sizes scale off the container font-size which JS sets per-pill. */
-.pdp {
-  position: absolute;
-  left: 0; right: 0; top: 0; bottom: 0;
-  /* top padding leaves room for the rotating video above */
+/* ── Standalone PDP card (slides in from right) ──────────
+   Mirrors the pill column on the right side of the video. Sized + positioned
+   inline by layoutPills(). Content is rebuilt on each open / swap. */
+.pdp-card {
+  position: fixed;
+  z-index: 5;
+  box-sizing: border-box;
+  /* width / height / top / left set inline by JS */
   padding: 12.3em 0.7em 0.7em;
   display: flex;
   flex-direction: column;
-  box-sizing: border-box;
-  opacity: 0;
-  pointer-events: none;
-  /* fast fade-OUT (no delay); fade-IN is overridden in .is-expanded below */
-  transition: opacity 0.12s ease;
+  background: rgba(2, 8, 80, 0.85);
+  border-radius: 0.7em;
   font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
   color: rgba(255, 255, 255, 0.94);
+  /* Off-screen right by default */
+  opacity: 0;
+  transform: translateX(110%);
+  pointer-events: none;
+  transition:
+    transform 0.4s cubic-bezier(0.65, 0, 0.35, 1),
+    opacity 0.32s ease;
 }
-.pill.is-expanded .pdp {
+.pdp-card.is-open {
   opacity: 1;
+  transform: translateX(0);
   pointer-events: auto;
-  /* fade IN: slower + delayed so it appears as the morph completes */
-  transition: opacity 0.22s ease 0.22s;
 }
+/* Cross-fade the inner content during a swap (children except img) */
+.pdp-card.is-swapping > :not(.pdp-img) {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+/* Image inside the PDP card — same top-anchored pattern as the pill thumb. */
+.pdp-img {
+  position: absolute;
+  top: 11%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 67.1%;
+  height: 77.25%;
+  max-width: var(--img-max-w, 100%);
+  max-height: var(--img-max-h, 100%);
+  object-fit: contain;
+  display: block;
+  transition: opacity 0.15s ease;
+}
+.pdp-card.is-swapping .pdp-img { opacity: 0; }
+/* Per-product image position (shorts sits higher in the card) */
+.pdp-card[data-product-id="shorts"] .pdp-img { top: 5%; }
 
 .pdp-name {
   font-size: 0.88em;
@@ -378,7 +406,7 @@ html, body {
 }
 
 /* Boots get 8 chips — squeeze a bit so they all fit one row */
-.pill[data-product-id="boots"] .size-chip {
+.pdp-card[data-product-id="boots"] .size-chip {
   min-width: 1.7em;
   padding: 0 0.32em;
   margin-right: 0.22em;
@@ -386,7 +414,7 @@ html, body {
 }
 
 /* Step 2: collapse non-selected chips entirely */
-.pdp.is-picked .size-chip:not(.is-selected) {
+.pdp-stage.is-picked .size-chip:not(.is-selected) {
   max-width: 0;
   min-width: 0;
   padding: 0;
@@ -422,7 +450,7 @@ html, body {
     opacity 0.22s ease 0.06s,
     filter 0.15s ease;
 }
-.pdp.is-picked .pdp-atc {
+.pdp-stage.is-picked .pdp-atc {
   max-width: 100%;
   padding: 0 0.5em;
   opacity: 1;
@@ -434,22 +462,13 @@ html, body {
   color: #0d1d42;
 }
 
-/* ── Expansion / collapse mechanics ─────────────────────── */
-/* Tapped pill morphs to the full column geometry (top:0 + pdp dims).
-   The image inside follows the pill until it hits --img-max-h. */
-.pill.is-expanded {
-  top: 0 !important;
-  width:  var(--pdp-w, 220px) !important;
-  height: var(--pdp-h, 234px) !important;
-  border-radius: 0.7em;
-  z-index: 5;
-}
-/* Other pills just fade where they are (no layout shift — they're absolute) */
-.pills.is-shopping .pill:not(.is-expanded) {
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.18s ease;
-}
+/* ── Selector mode: while a PDP is open, non-selected pills dim ──
+   The mini-thumb column doubles as a product selector when the PDP card
+   is up. Selected pill stays at 100%, the other two drop to 40%.
+   Faster opacity transition here (0.15s) so the dim/un-dim feels instant
+   on tap, instead of inheriting the base .pill 0.28s entry-fade duration. */
+.pills.is-shopping .pill { opacity: 0.4; transition: opacity 0.15s ease; }
+.pills.is-shopping .pill.is-selected { opacity: 1; }
 
 /* ── Cart icon (bottom-right) ───────────────────────────── */
 .cart {
@@ -461,16 +480,19 @@ html, body {
   width: var(--cart-size, 40px);
   height: var(--cart-size, 40px);
   border-radius: 50%;
-  background: linear-gradient(to right, #0d1d42, #1129cc);
-  color: rgba(255, 255, 255, 0.95);
+  background: rgba(2, 8, 80, 0.55); /* subtler navy, no full gradient */
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.9);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
   opacity: 0;
   transform: translateY(40%);
   transition: opacity 0.5s var(--ease), transform 0.6s var(--ease);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
 }
-.cart.is-in { opacity: 1; transform: translateY(0); transition-delay: 2.5s; }
+.cart.is-in { opacity: 1; transform: translateY(0); } /* entry scheduled by JS */
 .cart-icon { width: 55%; height: 55%; display: block; }
 .cart-count {
   position: absolute;

@@ -22,17 +22,20 @@
   const STOPS = 16;              // gradient stops — more = smoother veil
 
   let video, stage, dim, pillsWrap, caption, buy, cart, cartCount, drawer, drawerItems;
+  let pdpCard, pdpImg, pdpName, pdpPriceWas, pdpPriceNow, pdpStage;
   let doue = null;
   let lastBox = null;
   let revealed = false;
   let spotDone = false;
 
   // ── Shop state ───────────────────────────────────────
-  let expandedPill = null;          // .pill element currently expanded
+  let pdpOpen = false;              // is the PDP card visible
+  let currentPdpId = null;          // product id currently shown in PDP
   const selectedSize = {};          // { productId: 'M' } — chip user picked
   const cartItems = [];             // [{ productId, size }] in order added
   let pauseStart = null;            // video.currentTime when PDP opened
   let totalPaused = 0;              // accumulated paused seconds (defers SPOTLIGHT_END)
+  let revealTimers = [];            // setTimeout IDs for scheduled .is-in adds
 
   // ── Data ─────────────────────────────────────────────
   function loadLooks() {
@@ -66,12 +69,11 @@
     pillsWrap.innerHTML = '';
     const prods = App.products || [];
     for (const p of prods) {
+      selectedSize[p.id] = p.defaultSize || (p.sizes && p.sizes[0]) || null;
       const el = document.createElement('div');
       el.className = 'pill';
       el.dataset.productId = p.id;
-      // turntable video if provided — needs muted+playsinline for iOS autoplay,
-      // and we still call play() explicitly because iOS often refuses the first
-      // implicit autoplay attempt. Fall back to the still product PNG.
+      // Mini-thumb visual = rotating turntable video if available, else PNG.
       const srcs = p.videos || (p.video ? [{ src: p.video }] : null);
       if (srcs) {
         const v = document.createElement('video');
@@ -90,7 +92,6 @@
         const kick = () => v.play().catch(() => {});
         v.addEventListener('loadedmetadata', kick);
         v.addEventListener('canplay', kick);
-        // also kick on the first stage interaction (iOS sometimes needs a gesture)
         document.addEventListener('click', kick, { once: false, capture: true });
         el.appendChild(v);
       } else {
@@ -99,72 +100,14 @@
         img.alt = p.name || '';
         el.appendChild(img);
       }
-      // PDP content (hidden until pill is expanded) — single-row morph:
-      //   Step 1: all chips visible, centered. ATC collapsed (max-width:0).
-      //   Step 2 (.pdp.is-picked): non-selected chips collapse, ATC expands,
-      //   selected chip slides left as the row reflows. Tap the selected chip
-      //   again → step 1.
-      if (p.sizes && p.sizes.length) {
-        selectedSize[p.id] = p.defaultSize || p.sizes[0];
-        const pdp = document.createElement('div');
-        pdp.className = 'pdp';
-        pdp.innerHTML =
-          '<div class="pdp-name">' + escapeHtml(p.name) + '</div>' +
-          '<div class="pdp-price">' +
-            (p.priceWas ? '<span class="price-was">€' + p.priceWas + '</span>' : '') +
-            '<span class="price-now">€' + p.price + '</span>' +
-          '</div>' +
-          '<div class="pdp-stage">' +
-            p.sizes.map(s =>
-              '<button type="button" class="size-chip" data-size="' + s + '">' + s + '</button>'
-            ).join('') +
-            '<button type="button" class="pdp-atc">ADD TO CART</button>' +
-          '</div>';
-        el.appendChild(pdp);
-
-        // chip click:
-        //   - in step 2, tap on the SELECTED chip = go back to step 1
-        //   - otherwise = mark chip selected and advance to step 2
-        pdp.querySelectorAll('.size-chip').forEach(chip => {
-          chip.addEventListener('click', (e) => {
-            e.stopPropagation();
-            if (pdp.classList.contains('is-picked') && chip.classList.contains('is-selected')) {
-              pdp.classList.remove('is-picked');
-              return;
-            }
-            pdp.querySelectorAll('.size-chip').forEach(c => c.classList.remove('is-selected'));
-            chip.classList.add('is-selected');
-            selectedSize[p.id] = chip.dataset.size;
-            pdp.classList.add('is-picked');
-          });
-        });
-
-        // ATC → add + close
-        const atc = pdp.querySelector('.pdp-atc');
-        atc.addEventListener('click', (e) => {
-          e.stopPropagation();
-          if (atc.classList.contains('is-added')) return;
-          atc.classList.add('is-added');
-          atc.textContent = 'ADDED ✓';
-          addToCart(p.id, selectedSize[p.id]);
-          setTimeout(() => {
-            closePDP();
-            setTimeout(() => {
-              atc.classList.remove('is-added');
-              atc.textContent = 'ADD TO CART';
-            }, 500);
-          }, 600);
-        });
-      }
-      // caption follows the focused pill; defaults to the first product
+      // Caption follows hover/touch focus; defaults to first product.
       const focus = () => setCaption(p.name);
       el.addEventListener('pointerenter', focus);
       el.addEventListener('touchstart', focus, { passive: true });
-      // tap pill = open its PDP (if not already expanded)
+      // Pill tap → open / swap the standalone PDP card on the right.
       el.addEventListener('click', (e) => {
-        if (el.classList.contains('is-expanded')) return; // tap inside the card → no-op (children stopPropagation their own)
         e.stopPropagation();
-        openPDP(el);
+        onPillTap(p.id, el);
       });
       pillsWrap.appendChild(el);
     }
@@ -177,35 +120,128 @@
     })[c]);
   }
 
-  // ── PDP open / close ────────────────────────────────
-  function openPDP(pillEl) {
-    if (expandedPill === pillEl) return;
-    if (expandedPill) closePDP();
-    expandedPill = pillEl;
-    pillsWrap.classList.add('is-shopping');
-    pillEl.classList.add('is-expanded');
-    if (caption) caption.classList.add('is-hidden');
-    if (buy) buy.classList.add('is-paused');           // freeze the countdown bar
-    pauseStart = video.currentTime;                    // defer the SPOTLIGHT_END check
+  // ── Reveal scheduling ────────────────────────────────
+  // Adding .is-in to each element at its REAL scheduled time (instead of all
+  // at once with CSS transition-delay / animation-delay) avoids the brief
+  // pre-delay flash some browsers show while resolving long delays.
+  function scheduleReveal() {
+    clearRevealTimers();
+    const pillEls = pillsWrap.querySelectorAll('.pill');
+    const schedule = (delayMs, fn) => revealTimers.push(setTimeout(fn, delayMs));
+    schedule(1700, () => pillEls[0] && pillEls[0].classList.add('is-in')); // top pill
+    schedule(1850, () => pillEls[1] && pillEls[1].classList.add('is-in')); // middle
+    schedule(2000, () => pillEls[2] && pillEls[2].classList.add('is-in')); // bottom
+    schedule(2450, () => caption && caption.classList.add('is-in'));
+    schedule(2500, () => cart && cart.classList.add('is-in'));
+    schedule(2850, () => buy && buy.classList.add('is-in'));              // internal stagger handled by .buy CSS
   }
-  function closePDP() {
-    if (!expandedPill) return;
-    // Reset PDP to step 1 (size picker) for the next open. Wait until after
-    // the close transitions so the user doesn't see the swap mid-animation.
-    const pdp = expandedPill.querySelector('.pdp');
-    expandedPill.classList.remove('is-expanded');
-    if (pdp) setTimeout(() => {
-      pdp.classList.remove('is-picked');
-      pdp.querySelectorAll('.size-chip').forEach(c => c.classList.remove('is-selected'));
-    }, 320);
-    expandedPill = null;
+  function clearRevealTimers() {
+    revealTimers.forEach(t => clearTimeout(t));
+    revealTimers = [];
+  }
+
+  // ── PDP card open / close / swap ────────────────────
+  function onPillTap(productId, pillEl) {
+    if (!pdpOpen) return openPdp(productId, pillEl);
+    if (productId !== currentPdpId) return swapPdp(productId, pillEl);
+    // tapping the currently-selected pill is a no-op (close only via outside-tap / ATC)
+  }
+
+  function openPdp(productId, pillEl) {
+    populatePdp(productId);
+    pillsWrap.classList.add('is-shopping');
+    setSelectedPill(pillEl);
+    if (caption) caption.classList.add('is-hidden');
+    if (buy) buy.classList.add('is-paused');
+    pauseStart = video.currentTime;            // defer the SPOTLIGHT_END check
+    pdpCard.classList.add('is-open');
+    pdpCard.setAttribute('aria-hidden', 'false');
+    pdpOpen = true;
+    currentPdpId = productId;
+  }
+
+  function closePdp() {
+    if (!pdpOpen) return;
+    pdpCard.classList.remove('is-open');
+    pdpCard.setAttribute('aria-hidden', 'true');
     pillsWrap.classList.remove('is-shopping');
-    if (caption) caption.classList.remove('is-hidden'); // restore caption
-    if (buy) buy.classList.remove('is-paused');         // resume timer
-    if (pauseStart !== null) {                          // bank the paused duration
+    pillsWrap.querySelectorAll('.pill').forEach(p => p.classList.remove('is-selected'));
+    if (caption) caption.classList.remove('is-hidden');
+    if (buy) buy.classList.remove('is-paused');
+    if (pauseStart !== null) {
       totalPaused += Math.max(0, video.currentTime - pauseStart);
       pauseStart = null;
     }
+    pdpOpen = false;
+    currentPdpId = null;
+    // After the slide-out finishes, reset the chip / picked state for a clean next open
+    setTimeout(() => {
+      if (pdpStage) {
+        pdpStage.classList.remove('is-picked');
+        pdpStage.querySelectorAll('.size-chip').forEach(c => c.classList.remove('is-selected'));
+      }
+    }, 450);
+  }
+
+  function swapPdp(productId, pillEl) {
+    if (productId === currentPdpId) return;
+    // Flip the highlighted pill IMMEDIATELY so the dim/un-dim reads as
+    // instant feedback to the tap — don't wait for the swap-fade timeout.
+    setSelectedPill(pillEl);
+    pdpCard.classList.add('is-swapping');
+    setTimeout(() => {
+      populatePdp(productId);
+      pdpCard.classList.remove('is-swapping');
+      currentPdpId = productId;
+    }, 150);
+  }
+
+  function setSelectedPill(pillEl) {
+    pillsWrap.querySelectorAll('.pill').forEach(p => p.classList.remove('is-selected'));
+    if (pillEl) pillEl.classList.add('is-selected');
+  }
+
+  // Rebuild the card's content for a given product. Card stays in the DOM;
+  // only its inner text/image/chips swap.
+  function populatePdp(productId) {
+    const p = (App.products || []).find(x => x.id === productId);
+    if (!p) return;
+    pdpCard.dataset.productId = productId;
+    if (pdpImg) { pdpImg.src = p.img; pdpImg.alt = p.name || ''; }
+    if (pdpName) pdpName.textContent = p.name;
+    if (pdpPriceWas) pdpPriceWas.textContent = p.priceWas ? ('€' + p.priceWas) : '';
+    if (pdpPriceNow) pdpPriceNow.textContent = '€' + p.price;
+    if (!pdpStage) return;
+    pdpStage.classList.remove('is-picked');
+    pdpStage.innerHTML =
+      (p.sizes || []).map(s =>
+        '<button type="button" class="size-chip" data-size="' + s + '">' + s + '</button>'
+      ).join('') +
+      '<button type="button" class="pdp-atc">ADD TO CART</button>';
+    // wire chip clicks
+    pdpStage.querySelectorAll('.size-chip').forEach(chip => {
+      chip.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (pdpStage.classList.contains('is-picked') && chip.classList.contains('is-selected')) {
+          pdpStage.classList.remove('is-picked');
+          return;
+        }
+        pdpStage.querySelectorAll('.size-chip').forEach(c => c.classList.remove('is-selected'));
+        chip.classList.add('is-selected');
+        selectedSize[p.id] = chip.dataset.size;
+        pdpStage.classList.add('is-picked');
+      });
+    });
+    // wire ATC click
+    const atc = pdpStage.querySelector('.pdp-atc');
+    if (atc) atc.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (atc.classList.contains('is-added')) return;
+      atc.classList.add('is-added');
+      atc.textContent = 'ADDED ✓';
+      addToCart(p.id, selectedSize[p.id]);
+      setTimeout(() => closePdp(), 600);
+    });
   }
 
   // ── Cart ────────────────────────────────────────────
@@ -302,6 +338,16 @@
       cart.style.top  = (v.y + v.height - cs - v.height * (1 - 0.885 - 0.10631)) + 'px';
       cart.style.fontSize = (v.height * 0.06) + 'px';        // drives count/icon size scaling
     }
+    // PDP card: mirrors the pill column on the right side of the video
+    if (pdpCard) {
+      pdpCard.style.width  = pdpW + 'px';
+      pdpCard.style.height = pdpH + 'px';
+      pdpCard.style.top    = (v.y + v.height * 0.202) + 'px';
+      pdpCard.style.left   = (v.x + v.width - pdpW - v.width * 0.0344) + 'px';
+      pdpCard.style.fontSize = (v.height * 0.031) + 'px';
+      pdpCard.style.setProperty('--img-max-h', (pdpH * 0.5) + 'px');
+      pdpCard.style.setProperty('--img-max-w', (pdpW * 0.85) + 'px');
+    }
   }
 
   // ── Spotlight ────────────────────────────────────────
@@ -363,11 +409,8 @@
 
     if (!revealed && t >= SPOTLIGHT_START) {
       revealed = true;
-      dim.classList.add('is-on');
-      pillsWrap.querySelectorAll('.pill').forEach(p => p.classList.add('is-in'));
-      if (caption) caption.classList.add('is-in');
-      if (buy) buy.classList.add('is-in');
-      if (cart) cart.classList.add('is-in');
+      dim.classList.add('is-on');                                      // veil starts immediately
+      scheduleReveal();
     }
 
     // timer hits zero (minus any paused-shopping time) → orchestrated exit:
@@ -376,6 +419,7 @@
     const elapsed = (pauseStart !== null) ? (pauseStart - totalPaused) : (t - totalPaused);
     if (revealed && !spotDone && elapsed >= SPOTLIGHT_END) {
       spotDone = true;
+      if (pdpOpen) closePdp();                                         // slide PDP out with the moment
       if (buy) buy.classList.remove('is-in');                          // buy wipes back right→left
       if (cart) cart.classList.remove('is-in');                        // cart slides back down
       setTimeout(() => {
@@ -415,6 +459,14 @@
     cartCount = document.getElementById('cart-count');
     drawer = document.getElementById('cart-drawer');
     drawerItems = document.getElementById('drawer-items');
+    pdpCard = document.getElementById('pdp-card');
+    pdpImg = document.getElementById('pdp-img');
+    pdpName = document.getElementById('pdp-name');
+    pdpPriceWas = document.getElementById('pdp-price-was');
+    pdpPriceNow = document.getElementById('pdp-price-now');
+    pdpStage = document.getElementById('pdp-stage');
+    // Stop card-internal taps from bubbling to the stage (which would close it)
+    if (pdpCard) pdpCard.addEventListener('click', (e) => e.stopPropagation());
 
     loadLooks();
     buildPills();
@@ -475,16 +527,20 @@
     //   3) else → replay the whole moment from the top
     stage.addEventListener('click', () => {
       if (drawer && drawer.classList.contains('is-open')) { toggleDrawer(false); return; }
-      if (expandedPill) { closePDP(); return; }
+      if (pdpOpen) { closePdp(); return; }
       revealed = false; spotDone = false;
+      clearRevealTimers();                                             // cancel any queued .is-in adds
       pauseStart = null; totalPaused = 0;                              // reset shop-pause offset
+      pdpOpen = false; currentPdpId = null;                            // safety reset
       cartItems.length = 0; renderCart();                              // empty cart for a fresh take
       if (cart) cart.classList.remove('has-items', 'is-in');
+      if (pdpCard) pdpCard.classList.remove('is-open', 'is-swapping');
+      pillsWrap.classList.remove('is-shopping');
       dim.classList.remove('is-on');
       dim.style.background = '';
-      pillsWrap.querySelectorAll('.pill').forEach(p => p.classList.remove('is-in'));
-      if (caption) caption.classList.remove('is-in');
-      if (buy) buy.classList.remove('is-in');
+      pillsWrap.querySelectorAll('.pill').forEach(p => { p.classList.remove('is-in'); p.classList.remove('is-selected'); });
+      if (caption) { caption.classList.remove('is-in'); caption.classList.remove('is-hidden'); }
+      if (buy) { buy.classList.remove('is-in'); buy.classList.remove('is-paused'); }
       video.currentTime = 0;
       video.play().catch(() => {});
     });
