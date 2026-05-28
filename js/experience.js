@@ -330,13 +330,16 @@
     pillsWrap.style.setProperty('--img-max-w', (pdpW * 0.85) + 'px');
     // 1em inside the card ≈ 12px on phone (scales w/ video height) — drives all PDP text
     pillsWrap.style.setProperty('font-size', (v.height * 0.031) + 'px');
-    // Cart icon: bottom-right, mirroring the BUY banner position
+    // Cart icon: bottom-right, BOTTOM EDGE aligned with the BUY-NOW pill's
+    // bottom (= container_top + container_h × 0.517, where the pill sits at
+    // top:-20.8% / height:72.5% of the container).
     if (cart) {
-      const cs = v.height * 0.106;                           // similar size to BUY pill height
+      const cs = v.height * 0.085;                           // smaller than before
+      const buyPillBottomY = v.y + v.height * 0.94;          // 0.885 + 0.10631×0.517
       cart.style.setProperty('--cart-size', cs + 'px');
       cart.style.left = (v.x + v.width - cs - v.width * 0.0239) + 'px';
-      cart.style.top  = (v.y + v.height - cs - v.height * (1 - 0.885 - 0.10631)) + 'px';
-      cart.style.fontSize = (v.height * 0.06) + 'px';        // drives count/icon size scaling
+      cart.style.top  = (buyPillBottomY - cs) + 'px';
+      cart.style.fontSize = (v.height * 0.05) + 'px';        // drives count/icon size scaling
     }
     // PDP card: mirrors the pill column on the right side of the video
     if (pdpCard) {
@@ -409,8 +412,8 @@
 
     if (!revealed && t >= SPOTLIGHT_START) {
       revealed = true;
-      dim.classList.add('is-on');                                      // veil starts immediately
       scheduleReveal();
+      // Veil/spotlight gradient removed — Doué stays in the live frame, not dimmed.
     }
 
     // timer hits zero (minus any paused-shopping time) → orchestrated exit:
@@ -429,19 +432,7 @@
           setTimeout(() => pillEls[idx] && pillEls[idx].classList.remove('is-in'), i * 150);
         });
       }, 350);
-      setTimeout(() => dim.classList.remove('is-on'), 1100);            // veil after all pills are out
-    }
-
-    if (revealed && !spotDone) {
-      let box = doue ? App.utils.interpolateBox(doue.keyframes, t) : null;
-      // Before Doué's first keyframe (e.g. veil starts at 6s but track at 9.1s),
-      // anchor the veil at his first known position instead of falling back to centre.
-      if (!box && doue && doue.keyframes && doue.keyframes.length && t < doue.keyframes[0].time) {
-        const k = doue.keyframes[0];
-        box = { x1: k.x1, y1: k.y1, x2: k.x2, y2: k.y2 };
-      }
-      if (box) lastBox = box;
-      paintSpotlight(box || lastBox, videoRect());
+      // Veil removed — no dim layer to fade out at the end.
     }
 
     requestAnimationFrame(render);
@@ -536,8 +527,6 @@
       if (cart) cart.classList.remove('has-items', 'is-in');
       if (pdpCard) pdpCard.classList.remove('is-open', 'is-swapping');
       pillsWrap.classList.remove('is-shopping');
-      dim.classList.remove('is-on');
-      dim.style.background = '';
       pillsWrap.querySelectorAll('.pill').forEach(p => { p.classList.remove('is-in'); p.classList.remove('is-selected'); });
       if (caption) { caption.classList.remove('is-in'); caption.classList.remove('is-hidden'); }
       if (buy) { buy.classList.remove('is-in'); buy.classList.remove('is-paused'); }
