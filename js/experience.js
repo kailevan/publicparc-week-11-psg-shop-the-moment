@@ -12,8 +12,8 @@
 
   // ── Tunables (easy to dial in) ───────────────────────
   const STORAGE_KEY = 'shop-moment-data';
-  const SPOTLIGHT_START = 4.25;  // seconds — sequence kicks off (veil first, then pills/caption/buy)
-  const SPOTLIGHT_END = 11.65;   // seconds — moment ends right as the countdown bar drains (4s hold)
+  const SPOTLIGHT_START = 3.85;  // seconds — sequence kicks off (veil first, then pills/caption/buy)
+  const SPOTLIGHT_END = 11.25;   // seconds — moment ends right as the countdown bar drains (4s hold)
   const DIM_ALPHA = 0.6;         // max darkness of the veil (~scene at 40%)
   const GROW = 4.5;              // how far the veil spreads outward × Doué's box half-width
   const MIN_R_VH = 0.28;         // floor on veil radius as a fraction of the smaller screen side
@@ -23,7 +23,6 @@
 
   let video, stage, dim, pillsWrap, caption, buy, cart, cartCount, drawer, drawerItems;
   let pdpCard, pdpImg, pdpName, pdpPriceWas, pdpPriceNow, pdpStage;
-  let canvasNormal, canvasXray, ctxNormal, ctxXray, drawRafId;
   let doue = null;
   let lastBox = null;
   let revealed = false;
@@ -51,48 +50,14 @@
   }
 
   // ── Video rect (contained 16:9 area inside the stage) ─
-  // The <video> source is doubled-width (32:9), but each canvas renders one
-  // 16:9 HALF, so videoRect always uses 16:9 aspect regardless of the source.
   function videoRect() {
     const r = stage.getBoundingClientRect();
-    const va = 16 / 9;
+    const va = (video.videoWidth / video.videoHeight) || (16 / 9);
     const ca = r.width / r.height;
     let w, h, x, y;
     if (ca > va) { h = r.height; w = h * va; x = (r.width - w) / 2; y = 0; }
     else { w = r.width; h = w / va; x = 0; y = (r.height - h) / 2; }
     return { x, y, width: w, height: h };
-  }
-
-  // ── Double-video canvas pipeline (Week 3 pattern) ────
-  // Two canvases draw left + right halves of the source video each frame.
-  // The xray (right) canvas fades in via CSS opacity to create the highlight.
-  function startDrawLoop() {
-    if (!canvasNormal || !canvasXray || !ctxNormal || !ctxXray) return;
-    function draw() {
-      if (video.readyState >= 2 && video.videoWidth) {
-        const halfW = video.videoWidth / 2;
-        const h = video.videoHeight;
-        // Set internal canvas dims once (idempotent — only resizes on first run)
-        if (canvasNormal.width !== halfW) { canvasNormal.width = halfW; canvasNormal.height = h; }
-        if (canvasXray.width   !== halfW) { canvasXray.width   = halfW; canvasXray.height   = h; }
-        ctxNormal.drawImage(video, 0,     0, halfW, h, 0, 0, halfW, h);
-        ctxXray.drawImage(  video, halfW, 0, halfW, h, 0, 0, halfW, h);
-      }
-      drawRafId = requestAnimationFrame(draw);
-    }
-    cancelAnimationFrame(drawRafId);
-    drawRafId = requestAnimationFrame(draw);
-  }
-
-  function layoutCanvases() {
-    if (!canvasNormal || !canvasXray) return;
-    const v = videoRect();
-    for (const c of [canvasNormal, canvasXray]) {
-      c.style.left = v.x + 'px';
-      c.style.top  = v.y + 'px';
-      c.style.width  = v.width + 'px';
-      c.style.height = v.height + 'px';
-    }
   }
 
   // ── Pills + caption ──────────────────────────────────
@@ -163,9 +128,6 @@
     clearRevealTimers();
     const pillEls = pillsWrap.querySelectorAll('.pill');
     const schedule = (delayMs, fn) => revealTimers.push(setTimeout(fn, delayMs));
-    // Xray (dimmed-around-Doué) fades in first, briefly before the popups,
-    // so the moment "lights up" before any UI shows up.
-    schedule(300,  () => canvasXray && canvasXray.classList.add('is-on'));
     schedule(1700, () => pillEls[0] && pillEls[0].classList.add('is-in')); // top pill
     schedule(1850, () => pillEls[1] && pillEls[1].classList.add('is-in')); // middle
     schedule(2000, () => pillEls[2] && pillEls[2].classList.add('is-in')); // bottom
@@ -327,7 +289,6 @@
   // Pin the pill stack + caption to the video's left edge and scale them
   // to the contained video, matching the Figma frame's ratios.
   function layoutPills() {
-    layoutCanvases();
     const v = videoRect();
     const ph = v.height * 0.1937;   // 72.875 / 376.25
     const pw = v.height * 0.1808;   // 68.017 / 376.25
@@ -467,8 +428,7 @@
       spotDone = true;
       if (pdpOpen) closePdp();                                         // slide PDP out with the moment
       if (buy) buy.classList.remove('is-in');                          // buy wipes back right→left
-      if (cart) cart.classList.remove('is-in');                        // cart slides back down
-      if (canvasXray) canvasXray.classList.remove('is-on');            // xray fades back to normal
+      /* cart STAYS visible after the moment ends (only UI element that persists) */
       setTimeout(() => {
         if (caption) caption.classList.remove('is-in');                // caption fades w/ first pill
         const pillEls = pillsWrap.querySelectorAll('.pill');
@@ -500,13 +460,6 @@
     pdpPriceWas = document.getElementById('pdp-price-was');
     pdpPriceNow = document.getElementById('pdp-price-now');
     pdpStage = document.getElementById('pdp-stage');
-    canvasNormal = document.getElementById('canvas-normal');
-    canvasXray   = document.getElementById('canvas-xray');
-    if (canvasNormal) ctxNormal = canvasNormal.getContext('2d');
-    if (canvasXray)   ctxXray   = canvasXray.getContext('2d');
-    layoutCanvases();
-    if (video.readyState >= 1) startDrawLoop();
-    else video.addEventListener('loadedmetadata', startDrawLoop, { once: true });
     // Stop card-internal taps from bubbling to the stage (which would close it)
     if (pdpCard) pdpCard.addEventListener('click', (e) => e.stopPropagation());
 
@@ -577,7 +530,6 @@
       cartItems.length = 0; renderCart();                              // empty cart for a fresh take
       if (cart) cart.classList.remove('has-items', 'is-in');
       if (pdpCard) pdpCard.classList.remove('is-open', 'is-swapping');
-      if (canvasXray) canvasXray.classList.remove('is-on');
       pillsWrap.classList.remove('is-shopping');
       pillsWrap.querySelectorAll('.pill').forEach(p => { p.classList.remove('is-in'); p.classList.remove('is-selected'); });
       if (caption) { caption.classList.remove('is-in'); caption.classList.remove('is-hidden'); }

@@ -27,27 +27,14 @@ html, body {
 
 /* ── Stage ─────────────────────────────────────────────── */
 .stage { position: fixed; inset: 0; background: #000; }
-/* Hidden video element: source of playback only — canvases draw from it */
 .stage-video {
   position: absolute;
   inset: 0;
-  width: 1px; height: 1px;
-  opacity: 0;
-  pointer-events: none;
-}
-/* Canvases: position/size set inline by JS to match videoRect (contained 16:9). */
-.stage-canvas {
-  position: absolute;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
   display: block;
-  pointer-events: none;
 }
-/* X-ray canvas (right half of double video — dimmed-except-Doué) sits over
-   normal canvas. Fades in just before popups; fades out as the moment ends. */
-.stage-xray {
-  opacity: 0;
-  transition: opacity 1.4s ease;
-}
-.stage-xray.is-on { opacity: 1; }
 
 /* ── Spotlight dim layer ───────────────────────────────── */
 /* The dark radial is painted into background via JS each frame so the
